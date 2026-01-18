@@ -50,19 +50,40 @@ Job Description Input
    OPENAI_API_KEY=your-key-here
    ```
 
-3. **Run**:
+3. **Run Everything**:
    ```bash
-   # On macOS, you may need to set this environment variable to avoid OpenMP conflicts
+   ./run.sh
+   ```
+   This starts both the backend (http://localhost:8000) and frontend (http://localhost:3000).
+
+   Or run manually:
+   ```bash
+   # Terminal 1: Backend
    export KMP_DUPLICATE_LIB_OK=TRUE
    uvicorn app.main:app --reload
+
+   # Terminal 2: Frontend
+   cd frontend && npm start
    ```
 
-4. **Test API**:
-   ```bash
-   curl -X POST "http://localhost:8000/analyze" \
-        -H "Content-Type: application/json" \
-        -d '{"job_description": "Python developer with LangChain experience", "current_skills": ["Python"]}'
-   ```
+## Frontend
+
+A React TypeScript frontend is included for easy job analysis:
+
+```bash
+# Terminal 1: Start the backend
+export KMP_DUPLICATE_LIB_OK=TRUE
+uvicorn app.main:app --reload
+
+# Terminal 2: Start the frontend
+cd frontend
+npm install
+npm start
+```
+
+The frontend will be available at http://localhost:3000 and connects to the FastAPI backend at http://localhost:8000.
+
+**Note**: Both servers must be running simultaneously for the frontend to work.
 
 ## Docker
 
