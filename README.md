@@ -123,3 +123,24 @@ If you get import errors after switching LLM providers:
 ```bash
 pip install -r requirements.txt  # Reinstall dependencies
 ```
+
+## Persistent Vector Store (Pinecone)
+
+For production use with larger datasets and persistence across restarts:
+
+### Setup Pinecone
+
+1. **Create account**: https://www.pinecone.io/
+2. **Get API key**: Copy from Pinecone dashboard
+3. **Update `.env`**:
+   ```
+   PINECONE_API_KEY=your-pinecone-api-key
+   PINECONE_INDEX_NAME=ai-job-research
+   USE_PINECONE=true
+   ```
+
+
+**Development/Demo**: Use FAISS (free, local, fast)
+**Production**: Use Pinecone (persistent, scalable, managed)
+
+The code automatically switches based on `USE_PINECONE` environment variable.
