@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './App.css';
 
 interface JobAnalysisRequest {
@@ -124,16 +126,22 @@ function App() {
 
             <div className="result-section">
               <h3>Learning Plan:</h3>
-              <p>{result.learning_plan}</p>
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {result.learning_plan}
+                </ReactMarkdown>
+              </div>
             </div>
 
             <div className="result-section">
               <h3>Relevant Resources:</h3>
-              <ul>
-                {result.relevant_resources.map((resource, index) => (
-                  <li key={index}>{resource}</li>
-                ))}
-              </ul>
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {result.relevant_resources.map((resource, index) => 
+                    `${index + 1}. ${resource}`
+                  ).join('\n\n')}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         )}
