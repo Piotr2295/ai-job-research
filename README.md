@@ -144,3 +144,46 @@ For production use with larger datasets and persistence across restarts:
 **Production**: Use Pinecone (persistent, scalable, managed)
 
 The code automatically switches based on `USE_PINECONE` environment variable.
+
+## MCP Server Integration
+
+A **Model Context Protocol (MCP) server** is included for advanced AI assistant integration:
+
+### What is MCP?
+MCP allows AI assistants (like Claude) to securely access external tools and data sources through a standardized protocol.
+
+### Features
+- ✅ **Persistent Storage**: SQLite database for user profiles and job analyses
+- ✅ **Learning Progress Tracking**: Monitor skill development over time
+- ✅ **GitHub Profile Analysis**: Extract skills from coding portfolios
+- ✅ **Job Market Intelligence**: Search real-time job postings
+- ✅ **File System Operations**: Save/load analyses and learning plans
+
+### Setup MCP Server
+```bash
+cd mcp-server
+pip install -r requirements.txt
+python server.py
+```
+
+### Connect to Claude Desktop
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "job-research": {
+      "command": "python",
+      "args": ["/path/to/project/mcp-server/server.py"]
+    }
+  }
+}
+```
+
+### Use Cases
+- **Career Tracking**: Save and compare job analyses over time
+- **Skill Development**: Track learning progress with deadlines
+- **Portfolio Analysis**: Automatically assess GitHub repositories
+- **Job Search**: Get real-time job market data
+- **Document Management**: Persist analyses as files
+
+See `mcp-server/README.md` for detailed documentation.
