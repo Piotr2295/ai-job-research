@@ -1,7 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.agent import agent
-from app.models import JobAnalysisRequest, JobAnalysisResponse
+from app.models import JobAnalysisRequest, JobAnalysisResponse, SaveJobAnalysisRequest, UpdateLearningProgressRequest, SaveFileRequest
+import sqlite3
+import json
+import os
+from pathlib import Path
+import httpx
+from typing import List, Optional
 
 app = FastAPI(title="AI Job Research & Summary Agent")
 
@@ -13,6 +19,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Database setup
+DB_PATH = Path(__file__).parent.parent / "mcp-server" / "job_research.db"
+
+def get_db_connection():
+    """Get database connection"""
+    return sqlite3.connect(DB_PATH)
 
 @app.get("/")
 async def root():
@@ -32,6 +45,245 @@ async def analyze_job(request: JobAnalysisRequest):
         relevant_resources=result["relevant_resources"]
     )
 
-@app.get("/")
-async def root():
-    return {"message": "AI Job Research & Summary Agent API"}
+# MCP Server functionality integrated into FastAPI
+
+@app.post("/api/save-job-analysis")
+async def save_job_analysis(request: SaveJobAnalysisRequest):
+    """Save a job analysis to the database"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO job_analyses
+            (user_id, job_title, company, skills_required, skill_gaps, learning_plan)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            request.user_id,
+            request.job_title,
+            request.company,
+            json.dumps(request.skills_required),
+            json.dumps(request.skill_gaps),
+            request.learning_plan
+        ))
+
+        analysis_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        return {"message": f"Job analysis saved successfully with ID: {analysis_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving job analysis: {str(e)}")
+
+@app.get("/api/user-analyses/{user_id}")
+async def get_user_analyses(user_id: str, limit: int = 10):
+    """Retrieve previous job analyses for a user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT id, job_title, company, skills_required, skill_gaps,
+                   learning_plan, analysis_date
+            FROM job_analyses
+            WHERE user_id = ?
+            ORDER BY analysis_date DESC
+            LIMIT ?
+        ''', (user_id, limit))
+
+        analyses = []
+        for row in cursor.fetchall():
+            analyses.append({
+                "id": row[0],
+                "job_title": row[1],
+                "company": row[2],
+                "skills_required": json.loads(row[3]),
+                "skill_gaps": json.loads(row[4]),
+                "learning_plan": row[5],
+                "analysis_date": row[6]
+            })
+
+        conn.close()
+        return {"analyses": analyses}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving analyses: {str(e)}")
+
+@app.post("/api/update-learning-progress")
+async def update_learning_progress(request: UpdateLearningProgressRequest):
+    """Update learning progress for a specific skill"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if progress record exists
+        cursor.execute(
+            "SELECT id FROM learning_progress WHERE user_id = ? AND skill = ?",
+            (request.user_id, request.skill)
+        )
+
+        existing = cursor.fetchone()
+
+        if existing:
+            # Update existing record
+            cursor.execute('''
+                UPDATE learning_progress
+                SET progress_percentage = ?, completed_modules = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND skill = ?
+            ''', (request.progress_percentage, json.dumps(request.completed_modules), request.user_id, request.skill))
+        else:
+            # Create new record
+            cursor.execute('''
+                INSERT INTO learning_progress (user_id, skill, progress_percentage, completed_modules)
+                VALUES (?, ?, ?, ?)
+            ''', (request.user_id, request.skill, request.progress_percentage, json.dumps(request.completed_modules)))
+
+        conn.commit()
+        conn.close()
+
+        return {"message": f"Learning progress updated for {request.skill}: {request.progress_percentage}% complete"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating progress: {str(e)}")
+
+@app.get("/api/analyze-github/{username}")
+async def analyze_github_profile(username: str):
+    """Analyze a GitHub profile"""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get user profile
+            user_response = await client.get(f"https://api.github.com/users/{username}")
+            user_data = user_response.json()
+
+            # Get user repositories
+            repos_response = await client.get(f"https://api.github.com/users/{username}/repos?sort=updated&per_page=10")
+            repos_data = repos_response.json()
+
+        # Extract skills from repository languages and names
+        languages = {}
+        project_types = []
+
+        for repo in repos_data:
+            if repo.get("language"):
+                languages[repo["language"]] = languages.get(repo["language"], 0) + 1
+
+            # Analyze project names for technologies
+            name = repo.get("name", "").lower()
+            if any(keyword in name for keyword in ["api", "rest", "backend"]):
+                project_types.append("API Development")
+            if any(keyword in name for keyword in ["react", "vue", "angular", "frontend"]):
+                project_types.append("Frontend Development")
+            if any(keyword in name for keyword in ["ml", "ai", "machine", "learning"]):
+                project_types.append("Machine Learning")
+            if any(keyword in name for keyword in ["fastapi", "flask", "django"]):
+                project_types.append("Python Web Development")
+
+        # Generate analysis
+        top_languages = sorted(languages.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        analysis = {
+            "username": username,
+            "profile_summary": {
+                "public_repos": user_data.get('public_repos', 0),
+                "followers": user_data.get('followers', 0),
+                "following": user_data.get('following', 0)
+            },
+            "top_languages": [{"language": lang, "count": count} for lang, count in top_languages],
+            "inferred_skills": list(set(project_types)),
+            "suggested_roles": [
+                "Full-Stack Developer" if 'Frontend Development' in project_types and 'API Development' in project_types else "",
+                "Backend Developer" if 'API Development' in project_types else "",
+                "Frontend Developer" if 'Frontend Development' in project_types else "",
+                "ML Engineer" if 'Machine Learning' in project_types else "",
+                "Python Developer" if any(lang[0] == 'Python' for lang in top_languages) else ""
+            ]
+        }
+
+        # Filter out empty strings
+        analysis["suggested_roles"] = [role for role in analysis["suggested_roles"] if role]
+
+        return analysis
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error analyzing GitHub profile: {str(e)}")
+
+@app.get("/api/search-jobs")
+async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
+    """Search for job postings"""
+    try:
+        # Using JSearch API (requires RAPIDAPI_KEY environment variable)
+        url = "https://jsearch.p.rapidapi.com/search"
+        api_key = os.getenv("RAPIDAPI_KEY")
+
+        if not api_key:
+            return {"error": "RAPIDAPI_KEY environment variable not set. Job search unavailable."}
+
+        querystring = {
+            "query": f"{keyword} in {location}" if location else keyword,
+            "page": "1",
+            "num_pages": "1"
+        }
+
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": "jsearch.p.rapidapi.com"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=querystring)
+            data = response.json()
+
+        if "data" not in data:
+            return {"jobs": [], "message": "No job postings found or API limit reached."}
+
+        jobs = data["data"][:limit]
+
+        results = []
+        for job in jobs:
+            results.append({
+                "title": job.get("job_title", "Unknown"),
+                "company": job.get("employer_name", "Unknown"),
+                "location": job.get("job_city", "Remote"),
+                "description": job.get("job_description", "")[:200] + "...",
+                "url": job.get("job_apply_link", "")
+            })
+
+        return {"jobs": results}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching job postings: {str(e)}")
+
+@app.post("/api/save-file")
+async def save_file_to_workspace(request: SaveFileRequest):
+    """Save content to a file in the workspace"""
+    try:
+        workspace_dir = Path(__file__).parent.parent
+        file_path = workspace_dir / request.directory / request.filename
+
+        # Create directory if it doesn't exist
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write content to file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(request.content)
+
+        return {"message": f"File saved successfully: {file_path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
+
+@app.get("/api/read-file")
+async def read_file_from_workspace(filename: str, directory: str = "analyses"):
+    """Read content from a file in the workspace"""
+    try:
+        workspace_dir = Path(__file__).parent.parent
+        file_path = workspace_dir / directory / filename
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        return {"content": content, "filename": filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
