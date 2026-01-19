@@ -8,6 +8,7 @@ langgraph
 faiss-cpu
 pydantic
 python-dotenv
+httpx
 pytest
 pinecone-client
 mcp>=1.0.0

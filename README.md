@@ -1,37 +1,46 @@
-# AI Job Research & Summary Agent
+# AI Job Research & Career Development Platform
 
-Simple demo app showcasing LLM-powered agents, Python async programming, LangGraph, RAG, and more.
+A comprehensive AI-powered platform for job analysis, skill development tracking, and career growth. Features LLM agents, RAG systems, MCP integration, and a unified web interface.
 
 ## Overview
 
-This agent accepts a job description, analyzes required skills, retrieves relevant learning resources using RAG, identifies skill gaps, and generates a personalized learning plan.
+This platform provides multiple AI-powered tools for career development:
+
+- **Job Analysis**: Analyze job descriptions to identify required skills, gaps, and learning plans
+- **Career Tracking**: Save and compare job analyses over time with persistent storage
+- **Learning Progress**: Track skill development with progress monitoring
+- **GitHub Analysis**: Extract skills and suggest roles from coding portfolios
+- **Job Search**: Real-time job market intelligence and postings
+- **File Management**: Save and organize analyses and learning materials
 
 ## Architecture
 
 ```
-Job Description Input
-       ↓
-   FastAPI Endpoint
-       ↓
-   LangGraph Agent
-   ├── Extract Skills (LLM)
-   ├── Retrieve Resources (RAG)
-   ├── Analyze Gaps (LLM)
-   └── Generate Plan (LLM)
-       ↓
-   JSON Response
+Unified Web Application
+├── React TypeScript Frontend
+│   ├── Job Analysis Form
+│   ├── Saved Analyses Dashboard
+│   ├── Learning Progress Tracker
+│   ├── GitHub Profile Analyzer
+│   ├── Job Search Interface
+│   └── File Manager
+│
+└── FastAPI Backend
+    ├── LangGraph Agent (Job Analysis)
+    ├── MCP Tools Integration
+    ├── SQLite Database
+    ├── Vector Store (FAISS/Pinecone)
+    └── External API Integrations
 ```
 
 ## Tech Stack
 
-- **Python 3.11** with async programming
-- **FastAPI** for the API service
-- **LangGraph** for multi-step agent orchestration
-- **LangChain** for LLM integration
-- **FAISS** vector store for RAG
-- **OpenAI GPT-4o-mini** (easily swappable to Gemini/Claude)
-- **Docker** for containerization
-- **pytest** for testing
+- **Backend**: Python 3.11+, FastAPI, async programming
+- **Frontend**: React TypeScript, modern UI components
+- **AI/ML**: LangGraph agents, LangChain, OpenAI GPT-4o-mini
+- **Data**: SQLite database, FAISS/Pinecone vector stores
+- **APIs**: GitHub API, job search APIs, MCP protocol
+- **Infrastructure**: Docker, MCP server for AI assistant integration
 
 ## Quick Start
 
@@ -45,30 +54,33 @@ Job Description Input
    pip install -r requirements.txt
    ```
 
-2. **Set API Key**:
+2. **Set API Keys**:
    Create `.env` file:
    ```
-   OPENAI_API_KEY=your-key-here
+   OPENAI_API_KEY=your-openai-key-here
+   GITHUB_TOKEN=your-github-token-here  # Optional, for enhanced GitHub analysis
    ```
 
-3. **Run Everything**:
+3. **Start the Application**:
 
    ```bash
    ./run.sh
    ```
 
-   This starts both the backend (http://localhost:8000) and frontend (http://localhost:3000).
-
    Or run manually:
 
    ```bash
-   # Terminal 1: Backend
+   # Backend (Terminal 1)
    export KMP_DUPLICATE_LIB_OK=TRUE
    uvicorn app.main:app --reload
 
-   # Terminal 2: Frontend
+   # Frontend (Terminal 2)
    cd frontend && npm start
    ```
+
+4. **Open your browser** to http://localhost:3000
+
+The application provides a complete career development dashboard with all features accessible through a single web interface.
 
 ## Frontend
 
@@ -150,13 +162,13 @@ The code automatically switches based on `USE_PINECONE` environment variable.
 
 ## MCP Server Integration
 
-A **Model Context Protocol (MCP) server** is included for advanced AI assistant integration:
+A **Model Context Protocol (MCP) server** is included for advanced AI assistant integration. All MCP functionality is also available through the web interface.
 
 ### What is MCP?
 
 MCP allows AI assistants (like Claude) to securely access external tools and data sources through a standardized protocol.
 
-### Features
+### Features Available via Web & MCP
 
 - **Persistent Storage**: SQLite database for user profiles and job analyses
 - **Learning Progress Tracking**: Monitor skill development over time
@@ -164,16 +176,26 @@ MCP allows AI assistants (like Claude) to securely access external tools and dat
 - **Job Market Intelligence**: Search real-time job postings
 - **File System Operations**: Save/load analyses and learning plans
 
-### Setup MCP Server
+### Web Interface (Recommended)
+
+The React frontend provides a user-friendly interface for all features:
+- Job analysis with instant results
+- Saved analyses dashboard
+- Learning progress tracking
+- GitHub profile analysis
+- Job search functionality
+- File management tools
+
+### MCP Server Setup (Optional)
+
+For integration with AI assistants like Claude Desktop:
 
 ```bash
-# Terminal 3: Start the MCP server
+# Start the MCP server
 cd mcp-server
 pip install -r requirements.txt
 python server.py
 ```
-
-### Connect to Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -188,12 +210,41 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Use Cases
+## Features Guide
 
-- **Career Tracking**: Save and compare job analyses over time
-- **Skill Development**: Track learning progress with deadlines
-- **Portfolio Analysis**: Automatically assess GitHub repositories
-- **Job Search**: Get real-time job market data
-- **Document Management**: Persist analyses as files
+### Job Analysis
+Paste any job description and your current skills to get:
+- Required skills extraction
+- Skill gap analysis
+- Personalized learning plan
+- Relevant resources and courses
 
-See `mcp-server/README.md` for detailed documentation.
+### Saved Analyses
+- Store unlimited job analyses
+- Compare opportunities over time
+- Track career progression
+- Export and share analyses
+
+### Learning Progress Tracking
+- Monitor skill development
+- Set progress goals
+- Track completed modules
+- Visualize learning journey
+
+### GitHub Profile Analysis
+- Analyze coding portfolios
+- Extract technical skills
+- Suggest job roles
+- Identify areas for improvement
+
+### Job Search
+- Real-time job market data
+- Filter by keywords and location
+- Direct application links
+- Market trend insights
+
+### File Management
+- Save analyses as files
+- Organize learning materials
+- Backup important documents
+- Share resources across devices
