@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "job-research-mcp": {
+      "command": "/Users/piotrciszek/Desktop/Repositories/ai-job-research/.venv/bin/python",
+      "args": ["/Users/piotrciszek/Desktop/Repositories/ai-job-research/mcp-server/server.py"],
+      "env": {
+        "PYTHONPATH": "/Users/piotrciszek/Desktop/Repositories/ai-job-research",
+        "PATH": "/Users/piotrciszek/Desktop/Repositories/ai-job-research/.venv/bin:$PATH"
+      }
+    }
+  }
+}

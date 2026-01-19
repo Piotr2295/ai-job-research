@@ -10,3 +10,5 @@ pydantic
 python-dotenv
 pytest
 pinecone-client
+mcp>=1.0.0
+httpx>=0.25.0

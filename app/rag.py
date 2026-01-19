@@ -15,12 +15,12 @@ SAMPLE_DOCS = [
 ]
 
 def get_faiss_vector_store():
-    """Local FAISS vector store - free, fast, but not persistent"""
+    """Local FAISS vector store"""
     embeddings = OpenAIEmbeddings()
     return FAISS.from_documents(SAMPLE_DOCS, embeddings)
 
 def get_pinecone_vector_store():
-    """Pinecone vector store - persistent, scalable, cloud-based"""
+    """Pinecone vector store"""
     embeddings = OpenAIEmbeddings()
     index_name = os.getenv("PINECONE_INDEX_NAME", "ai-job-research")
 
