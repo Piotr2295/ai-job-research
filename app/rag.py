@@ -71,3 +71,12 @@ def add_document(content: str, metadata: dict = None):
     doc = Document(page_content=content, metadata=metadata or {})
     vector_store.add_documents([doc])
     print(f"Added document: {content[:50]}...")
+
+def add_documents_to_store(documents: list[Document]):
+    """Add multiple documents to the vector store"""
+    global vector_store
+    if vector_store is None:
+        vector_store = get_vector_store()
+
+    vector_store.add_documents(documents)
+    print(f"Added {len(documents)} documents to vector store")

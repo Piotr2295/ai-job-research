@@ -1,13 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from app.agent import agent
-from app.models import JobAnalysisRequest, JobAnalysisResponse, SaveJobAnalysisRequest, UpdateLearningProgressRequest, SaveFileRequest
+from app.models import JobAnalysisRequest, JobAnalysisResponse, SaveJobAnalysisRequest, UpdateLearningProgressRequest, SaveFileRequest, AddUserExperienceRequest, ResumeOptimizationRequest, UploadResumeRequest, ParsedResume
 import sqlite3
 import json
 import os
 from pathlib import Path
 import httpx
 from typing import List, Optional
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(title="AI Job Research & Summary Agent")
 
@@ -287,3 +290,147 @@ async def read_file_from_workspace(filename: str, directory: str = "analyses"):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+
+# Resume Optimization Platform Features
+
+@app.post("/api/add-user-experience")
+async def add_user_experience(request: AddUserExperienceRequest):
+    """Add user resume/experience data to the knowledge base"""
+    try:
+        from app.rag import add_document
+
+        for experience in request.experiences:
+            content = f"""
+            User Experience: {experience.role} at {experience.company}
+            Duration: {experience.duration}
+            Achievements: {', '.join(experience.achievements)}
+            Skills Used: {', '.join(experience.skills)}
+            """
+
+            add_document(content, {
+                "type": "user_experience",
+                "user_id": request.user_id,
+                "role": experience.role,
+                "company": experience.company,
+                "skills": experience.skills
+            })
+
+        return {"message": f"Added {len(request.experiences)} experience(s) to knowledge base for user {request.user_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error adding user experience: {str(e)}")
+
+@app.post("/api/optimize-resume")
+async def optimize_resume(request: ResumeOptimizationRequest):
+    """Generate resume optimization suggestions based on job requirements and user experience"""
+    try:
+        print("Starting optimize_resume endpoint")
+        from app.rag import retrieve_resources
+        from app.agent import agent
+
+        print("Retrieving user experience")
+        # Retrieve user's relevant experience
+        user_experience_query = f"experience {request.user_id} {request.target_role}"
+        relevant_experiences = retrieve_resources(user_experience_query, k=5)
+        print(f"Retrieved {len(relevant_experiences)} experiences")
+
+        # Create optimization prompt
+        optimization_state = {
+            "job_description": request.job_description,
+            "target_role": request.target_role,
+            "target_company": request.target_company,
+            "user_experiences": relevant_experiences,
+            "task": "resume_optimization"
+        }
+        print("Created optimization state")
+
+        # Use the agent to generate optimization suggestions
+        print("Invoking agent")
+        result = agent.invoke(optimization_state)
+        print("Agent completed successfully")
+
+        return {
+            "optimized_resume_sections": result.get("resume_sections", []),
+            "keyword_suggestions": result.get("keywords", []),
+            "tailoring_recommendations": result.get("recommendations", []),
+            "experience_matches": relevant_experiences
+        }
+    except Exception as e:
+        print(f"Error in optimize_resume: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error optimizing resume: {str(e)}")
+
+@app.post("/api/upload-resume")
+async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
+    """Upload and parse a resume PDF file"""
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+
+        # Read file content
+        file_content = await file.read()
+
+        # Parse the resume
+        from app.resume_parser import parse_resume
+        parsed_data = parse_resume(file_content, file.filename)
+
+        # Store parsed data in vector store for future retrieval
+        from app.rag import add_documents_to_store
+        from langchain_core.documents import Document
+
+        # Create documents from parsed sections
+        documents = []
+        for section_name, section_content in parsed_data["sections"].items():
+            if section_content.strip():
+                doc = Document(
+                    page_content=f"Resume section: {section_name}\n{section_content}",
+                    metadata={
+                        "user_id": user_id,
+                        "filename": file.filename,
+                        "section": section_name,
+                        "type": "resume"
+                    }
+                )
+                documents.append(doc)
+
+        # Add experiences as separate documents
+        for exp in parsed_data["extracted_experiences"]:
+            exp_content = f"Experience: {exp.role} at {exp.company} ({exp.duration})"
+            if exp.achievements:
+                exp_content += f"\nAchievements: {'; '.join(exp.achievements)}"
+            if exp.skills:
+                exp_content += f"\nSkills: {'; '.join(exp.skills)}"
+
+            doc = Document(
+                page_content=exp_content,
+                metadata={
+                    "user_id": user_id,
+                    "filename": file.filename,
+                    "type": "experience",
+                    "role": exp.role,
+                    "company": exp.company
+                }
+            )
+            documents.append(doc)
+
+        # Add to vector store
+        add_documents_to_store(documents)
+
+        # Return parsed resume data
+        return {
+            "message": "Resume uploaded and parsed successfully",
+            "parsed_resume": {
+                "user_id": user_id,
+                "filename": file.filename,
+                "sections": parsed_data["sections"],
+                "extracted_experiences": [exp.dict() for exp in parsed_data["extracted_experiences"]],
+                "full_text_preview": parsed_data["full_text"][:500] + "..." if len(parsed_data["full_text"]) > 500 else parsed_data["full_text"]
+            }
+        }
+
+    except Exception as e:
+        print(f"Error uploading resume: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error uploading resume: {str(e)}")
