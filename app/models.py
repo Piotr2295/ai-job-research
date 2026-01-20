@@ -28,3 +28,30 @@ class SaveFileRequest(BaseModel):
     filename: str
     content: str
     directory: str = "analyses"
+
+class UserExperience(BaseModel):
+    role: str
+    company: str
+    duration: str
+    achievements: list[str]
+    skills: list[str]
+
+class AddUserExperienceRequest(BaseModel):
+    user_id: str
+    experiences: list[UserExperience]
+
+class ResumeOptimizationRequest(BaseModel):
+    user_id: str
+    job_description: str
+    target_role: str
+    target_company: str
+
+class UploadResumeRequest(BaseModel):
+    user_id: str
+
+class ParsedResume(BaseModel):
+    user_id: str
+    full_text: str
+    sections: dict[str, str]  # e.g., {"experience": "...", "skills": "...", "education": "..."}
+    extracted_experiences: list[UserExperience]
+    filename: str
