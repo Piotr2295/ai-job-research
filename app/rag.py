@@ -3,6 +3,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.documents import Document
 import os
+from .advanced_rag import create_advanced_rag_chain, RAGEvaluator, create_document_processing_pipeline
 
 # Sample documents for RAG
 SAMPLE_DOCS = [
@@ -80,3 +81,60 @@ def add_documents_to_store(documents: list[Document]):
 
     vector_store.add_documents(documents)
     print(f"Added {len(documents)} documents to vector store")
+
+# Advanced RAG Components
+_advanced_rag_chain = None
+_rag_evaluator = None
+
+def get_advanced_rag_chain():
+    """Get or create advanced RAG chain"""
+    global _advanced_rag_chain, vector_store
+    if _advanced_rag_chain is None:
+        if vector_store is None:
+            vector_store = get_vector_store()
+        _advanced_rag_chain = create_advanced_rag_chain(vector_store, SAMPLE_DOCS)
+    return _advanced_rag_chain
+
+def get_rag_evaluator():
+    """Get or create RAG evaluator"""
+    global _rag_evaluator, vector_store
+    if _rag_evaluator is None:
+        if vector_store is None:
+            vector_store = get_vector_store()
+        _rag_evaluator = RAGEvaluator(vector_store)
+    return _rag_evaluator
+
+def query_advanced_rag(question: str) -> str:
+    """Query using advanced RAG pipeline"""
+    chain = get_advanced_rag_chain()
+    return chain.invoke(question)
+
+def evaluate_rag_performance(query: str, response: str, ground_truth_docs: list[str] = None) -> dict:
+    """Evaluate RAG performance"""
+    evaluator = get_rag_evaluator()
+
+    # Evaluate retrieval if ground truth provided
+    retrieval_metrics = None
+    if ground_truth_docs:
+        retrieval_metrics = evaluator.evaluate_retrieval(query, ground_truth_docs)
+
+    # Get context documents used
+    vector_store = get_vector_store()
+    context_docs = vector_store.similarity_search(query, k=5)
+
+    # Evaluate generation
+    generation_metrics = evaluator.evaluate_generation(query, response, context_docs)
+
+    return {
+        "retrieval_metrics": retrieval_metrics,
+        "generation_metrics": generation_metrics,
+        "query": query,
+        "response_length": len(response)
+    }
+
+def process_and_add_documents(raw_documents: list[Document]) -> int:
+    """Process documents through pipeline and add to store"""
+    processor = create_document_processing_pipeline()
+    processed_docs = processor(raw_documents)
+    add_documents_to_store(processed_docs)
+    return len(processed_docs)

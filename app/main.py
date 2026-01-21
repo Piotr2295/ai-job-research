@@ -434,3 +434,68 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error uploading resume: {str(e)}")
+
+@app.post("/api/advanced-rag-query")
+async def advanced_rag_query(request: dict):
+    """Query using advanced RAG pipeline with evaluation"""
+    try:
+        question = request.get("question", "")
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
+
+        from app.rag import query_advanced_rag, evaluate_rag_performance
+
+        # Get advanced RAG response
+        answer = query_advanced_rag(question)
+
+        # Evaluate performance
+        evaluation = evaluate_rag_performance(question, answer)
+
+        return {
+            "question": question,
+            "answer": answer,
+            "evaluation": evaluation,
+            "pipeline_used": "Advanced RAG with query expansion and re-ranking"
+        }
+
+    except Exception as e:
+        print(f"Error in advanced RAG query: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error in advanced RAG query: {str(e)}")
+
+@app.get("/api/rag-performance-metrics")
+async def get_rag_performance_metrics():
+    """Get RAG performance metrics and pipeline information"""
+    try:
+        from app.advanced_rag import test_advanced_rag_pipeline
+
+        # Run a test to demonstrate the pipeline
+        test_results = test_advanced_rag_pipeline()
+
+        return {
+            "pipeline_status": "active",
+            "components": [
+                "QueryExpansionRetriever",
+                "RerankingRetriever",
+                "LCEL-based RAG Chain",
+                "RAG Evaluator"
+            ],
+            "capabilities": [
+                "Multi-step retrieval with query expansion",
+                "Cross-encoder re-ranking",
+                "Performance evaluation metrics",
+                "Conversational memory support"
+            ],
+            "test_results": {
+                "expanded_results_count": len(test_results.get("expanded_results", [])),
+                "reranked_results_count": len(test_results.get("reranked_results", [])),
+                "answer_preview": test_results.get("rag_answer", "")[:200] + "..."
+            }
+        }
+
+    except Exception as e:
+        print(f"Error getting RAG metrics: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error getting RAG metrics: {str(e)}")

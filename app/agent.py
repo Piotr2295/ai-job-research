@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph
 from langchain_openai import ChatOpenAI
 from app.prompts import SKILL_EXTRACTION_PROMPT, GAP_ANALYSIS_PROMPT, LEARNING_PLAN_PROMPT
-from app.rag import retrieve_resources
+from app.rag import retrieve_resources, query_advanced_rag, evaluate_rag_performance
 import os
 
 # Load environment variables
@@ -30,6 +30,18 @@ def retrieve_resources_node(state):
     state["relevant_resources"] = resources
     return state
 
+def advanced_rag_query_node(state):
+    """Use advanced RAG pipeline for complex queries"""
+    query = f"Advanced learning plan for skills: {' '.join(state['skills_required'])}"
+    advanced_response = query_advanced_rag(query)
+    state["advanced_rag_response"] = advanced_response
+
+    # Evaluate the RAG performance
+    evaluation = evaluate_rag_performance(query, advanced_response)
+    state["rag_evaluation"] = evaluation
+
+    return state
+
 def analyze_gaps(state):
     current_skills = state.get("current_skills", [])
     prompt = GAP_ANALYSIS_PROMPT.format(
@@ -42,12 +54,21 @@ def analyze_gaps(state):
     return state
 
 def generate_plan(state):
+    # Use both basic and advanced RAG responses
+    basic_resources = "\n".join(state["relevant_resources"])
+    advanced_response = state.get("advanced_rag_response", "")
+    rag_evaluation = state.get("rag_evaluation", {})
+
     prompt = LEARNING_PLAN_PROMPT.format(
         gaps=", ".join(state["skill_gaps"]),
-        resources="\n".join(state["relevant_resources"])
+        resources=f"Basic Resources:\n{basic_resources}\n\nAdvanced Analysis:\n{advanced_response}"
     )
     response = get_llm().invoke(prompt)
     state["learning_plan"] = response.content
+
+    # Include RAG evaluation in the state
+    state["rag_performance"] = rag_evaluation
+
     return state
 
 def optimize_resume_node(state):
@@ -92,13 +113,15 @@ def optimize_resume_node(state):
 graph = StateGraph(dict)
 graph.add_node("extract_skills", extract_skills)
 graph.add_node("retrieve_resources", retrieve_resources_node)
+graph.add_node("advanced_rag_query", advanced_rag_query_node)
 graph.add_node("analyze_gaps", analyze_gaps)
 graph.add_node("generate_plan", generate_plan)
 graph.add_node("optimize_resume", optimize_resume_node)
 
 graph.set_entry_point("extract_skills")
 graph.add_edge("extract_skills", "retrieve_resources")
-graph.add_edge("retrieve_resources", "analyze_gaps")
+graph.add_edge("retrieve_resources", "advanced_rag_query")
+graph.add_edge("advanced_rag_query", "analyze_gaps")
 
 # Add conditional logic for resume optimization
 def route_based_on_task(state):

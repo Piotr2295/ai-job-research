@@ -99,6 +99,11 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState<string>('');
   const [parsedResume, setParsedResume] = useState<any>(null);
 
+  // Advanced RAG state
+  const [ragQuestion, setRagQuestion] = useState('');
+  const [ragResponse, setRagResponse] = useState<any>(null);
+  const [ragMetrics, setRagMetrics] = useState<any>(null);
+
   // File Management state
   const [fileName, setFileName] = useState('');
   const [fileContent, setFileContent] = useState('');
@@ -400,6 +405,55 @@ function App() {
     }
   };
 
+  const queryAdvancedRAG = async () => {
+    if (!ragQuestion.trim()) {
+      alert('Please enter a question');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:8000/api/advanced-rag-query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: ragQuestion
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setRagResponse(data);
+    } catch (err) {
+      alert('Error querying advanced RAG: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
+  const loadRAGMetrics = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/rag-performance-metrics');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setRagMetrics(data);
+    } catch (err) {
+      alert('Error loading RAG metrics: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
+  // Load RAG metrics on component mount
+  useEffect(() => {
+    if (activeTab === 'rag') {
+      loadRAGMetrics();
+    }
+  }, [activeTab]);
+
   return (
     <div className="App">
       <header className="App-header">
@@ -443,6 +497,12 @@ function App() {
           onClick={() => setActiveTab('resume')}
         >
           Resume Optimizer
+        </button>
+        <button
+          className={activeTab === 'rag' ? 'nav-btn active' : 'nav-btn'}
+          onClick={() => setActiveTab('rag')}
+        >
+          Advanced RAG
         </button>
       </nav>
 
@@ -493,9 +553,11 @@ function App() {
               <div className="results">
                 <div className="result-header">
                   <h2>Analysis Results</h2>
-                  <button onClick={saveCurrentAnalysis} className="save-btn">
-                    Save Analysis
-                  </button>
+                  <div className="save-btn-container">
+                    <button onClick={saveCurrentAnalysis} className="save-btn">
+                      Save Analysis
+                    </button>
+                  </div>
                 </div>
 
                 <div className="result-section">
@@ -797,8 +859,9 @@ function App() {
         )}
 
         {activeTab === 'resume' && (
-          <div className="resume-optimizer">
-            <h2>Resume Optimizer</h2>
+          <>
+            <div className="resume-optimizer">
+              <h2>Resume Optimizer</h2>
             
             <div className="resume-section">
               <h3>Upload Your Resume (PDF)</h3>
@@ -857,20 +920,27 @@ function App() {
                   )}
                 </div>
               )}
+              </div>
             </div>
-            
+    
             <div className="resume-section">
-              <h3>Add Your Experience (Manual)</h3>
+              <div className="section-header">
+                <h3>Add Your Experience (Manual)</h3>
+              </div>
               <div className="experience-form">
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Role/Position:</label>
-                    <input
-                      type="text"
-                      value={currentExperience.role}
-                      onChange={(e) => setCurrentExperience({...currentExperience, role: e.target.value})}
-                      placeholder="e.g., Senior Python Developer"
-                    />
+                    <div className="label-container">
+                      <label>Role/Position:</label>
+                    </div>
+                    <div className="input-container">
+                      <input
+                        type="text"
+                        value={currentExperience.role}
+                        onChange={(e) => setCurrentExperience({...currentExperience, role: e.target.value})}
+                        placeholder="e.g., Senior Python Developer"
+                      />
+                    </div>
                   </div>
                   <div className="form-group">
                     <label>Company:</label>
@@ -911,9 +981,11 @@ function App() {
                     placeholder="Python, FastAPI, React, Docker"
                   />
                 </div>
-                <button onClick={addUserExperience} className="submit-btn">
-                  Add Experience
-                </button>
+                <div className="button-container">
+                  <button onClick={addUserExperience} className="submit-btn">
+                    Add Experience
+                  </button>
+                </div>
               </div>
 
               {userExperiences.length > 0 && (
@@ -939,7 +1011,9 @@ function App() {
             </div>
 
             <div className="resume-section">
-              <h3>Optimize Resume for Job</h3>
+              <div className="section-header">
+                <h3>Optimize Resume for Job</h3>
+              </div>
               <div className="optimization-form">
                 <div className="form-group">
                   <label>Job Description:</label>
@@ -970,14 +1044,19 @@ function App() {
                     />
                   </div>
                 </div>
-                <button onClick={optimizeResume} className="submit-btn">
-                  Optimize Resume
-                </button>
+                <div className="button-container">
+                  <button onClick={optimizeResume} className="submit-btn">
+                    Optimize Resume
+                  </button>
+                </div>
               </div>
 
+              <div className="optimization-container">
               {resumeOptimization && (
                 <div className="optimization-results">
-                  <h4>Resume Optimization Suggestions</h4>
+                  <div className="results-header">
+                    <h4>Resume Optimization Suggestions</h4>
+                  </div>
                   
                   <div className="result-section">
                     <h5>Key Skills & Keywords to Highlight:</h5>
@@ -1020,7 +1099,125 @@ function App() {
               )}
             </div>
           </div>
+          </>
         )}
+
+        <>
+          {activeTab === 'rag' && (
+            <div className="advanced-rag">
+              <h2>Advanced RAG Pipeline Demo</h2>
+              <p className="rag-description">
+                Experience cutting-edge LangChain RAG capabilities including query expansion, re-ranking, and performance evaluation.
+              </p>
+
+              <div className="rag-section">
+                <h3>Pipeline Status & Capabilities</h3>
+                {ragMetrics && (
+                  <div className="pipeline-info">
+                    <div className="status-indicator">
+                      <span className={`status ${ragMetrics.pipeline_status === 'active' ? 'active' : 'inactive'}`}>
+                        {ragMetrics.pipeline_status === 'active' ? '🟢 Active' : '🔴 Inactive'}
+                      </span>
+                    </div>
+
+                    <div className="capabilities">
+                      <h4>Advanced Components:</h4>
+                      <ul>
+                        {ragMetrics.components?.map((component: string, index: number) => (
+                          <li key={index}>{component}</li>
+                        ))}
+                      </ul>
+
+                      <h4>Key Capabilities:</h4>
+                      <ul>
+                        {ragMetrics.capabilities?.map((capability: string, index: number) => (
+                          <li key={index}>{capability}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {ragMetrics.test_results && (
+                      <div className="test-results">
+                        <h4>Pipeline Test Results:</h4>
+                        <ul>
+                          <li>Query Expansion: {ragMetrics.test_results.expanded_results_count} results</li>
+                          <li>Re-ranking: {ragMetrics.test_results.reranked_results_count} results</li>
+                          <li>Answer Preview: {ragMetrics.test_results.answer_preview}</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="rag-section">
+                <h3>Query Advanced RAG</h3>
+                <div className="rag-query-form">
+                  <div className="form-group">
+                    <label>Ask a complex question about career development:</label>
+                    <textarea
+                      value={ragQuestion}
+                      onChange={(e) => setRagQuestion(e.target.value)}
+                      placeholder="e.g., What are the best strategies for learning advanced LangChain techniques for production RAG systems?"
+                      rows={3}
+                    />
+                  </div>
+                  <button onClick={queryAdvancedRAG} className="submit-btn">
+                    Query Advanced RAG
+                  </button>
+                </div>
+
+                {ragResponse && (
+                  <div className="rag-results">
+                    <h4>Advanced RAG Response</h4>
+
+                    <div className="result-section">
+                      <h5>Question:</h5>
+                      <p>{ragResponse.question}</p>
+                    </div>
+
+                    <div className="result-section">
+                      <h5>Answer:</h5>
+                      <div className="markdown-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {ragResponse.answer}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+
+                    <div className="result-section">
+                      <h5>Pipeline Used:</h5>
+                      <p>{ragResponse.pipeline_used}</p>
+                    </div>
+
+                    {ragResponse.evaluation && (
+                      <div className="result-section">
+                        <h5>Performance Evaluation:</h5>
+                        <div className="evaluation-details">
+                          {ragResponse.evaluation.generation_metrics && (
+                            <div>
+                              <h6>Generation Metrics:</h6>
+                              <ul>
+                                <li>Response Length: {ragResponse.evaluation.generation_metrics.response_length} characters</li>
+                                <li>Context Docs Used: {ragResponse.evaluation.generation_metrics.context_docs_used}</li>
+                              </ul>
+                            </div>
+                          )}
+                          <div>
+                            <h6>LLM Evaluation:</h6>
+                            <div className="evaluation-text">
+                              {ragResponse.evaluation.generation_metrics?.evaluation || 'Evaluation in progress...'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       </main>
     </div>
   );
