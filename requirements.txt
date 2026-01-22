@@ -4,6 +4,8 @@ langchain
 langchain-openai
 langchain-pinecone
 langchain-community
+langchain-core
+langchain-text-splitters
 langgraph
 faiss-cpu
 pydantic
@@ -16,3 +18,5 @@ httpx>=0.25.0
 PyPDF2
 pdfplumber
 python-multipart
+sentence-transformers
+rank-bm25
