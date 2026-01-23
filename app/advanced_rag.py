@@ -3,6 +3,7 @@ Advanced RAG Pipeline Implementation
 Demonstrates LangChain pipeline building and RAG flows for job requirements
 """
 
+import os
 from typing import List, Dict, Any
 from langchain_core.vectorstores import VectorStore
 from langchain_core.documents import Document
@@ -21,6 +22,26 @@ load_dotenv()
 # Initialize components
 embeddings = OpenAIEmbeddings()
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+
+def get_env_int(name: str, default: int) -> int:
+    """Read an int env var with a safe fallback."""
+    try:
+        return int(os.getenv(name, default))
+    except ValueError:
+        return default
+
+
+def get_retriever_mode() -> str:
+    """Return selected retriever mode (hybrid or expansion)."""
+    return os.getenv("RAG_RETRIEVER_MODE", "hybrid").lower()
+
+
+# Environment knobs (defaults):
+# - RAG_RETRIEVER_MODE: "hybrid" (BM25+semantic) or "expansion" (LLM query expansion)
+# - RAG_HYBRID_K: 10 (docs fetched by hybrid retriever)
+# - RAG_EXPANSION_K: 10 (docs fetched per expanded query)
+# - RAG_RERANK_K: 5 (docs kept after cross-encoder rerank)
 
 
 class QueryExpansionRetriever:
@@ -144,7 +165,7 @@ class HybridRetriever:
         """Retrieve using hybrid approach"""
         all_docs = []
         for retriever in self.retrievers:
-            docs = retriever._get_relevant_documents(query)
+            docs = retriever.invoke(query)
             all_docs.extend(docs)
 
         # Remove duplicates and return top results
@@ -163,23 +184,35 @@ class HybridRetriever:
 def create_advanced_rag_chain(vectorstore: VectorStore, documents: List[Document]):
     """Create an advanced RAG chain using LCEL"""
 
-    # Create advanced retriever pipeline
-    query_expansion_retriever = QueryExpansionRetriever(
-        vectorstore=vectorstore,
-        llm=llm,
-        k=10,
-    )
-    reranking_retriever = RerankingRetriever(
-        base_retriever=query_expansion_retriever,
-        top_k=5,
+    # Create advanced retriever pipeline with configurable mode
+    retriever_mode = get_retriever_mode()
+    k_hybrid = get_env_int("RAG_HYBRID_K", 10)
+    k_expansion = get_env_int("RAG_EXPANSION_K", 10)
+    k_rerank = get_env_int("RAG_RERANK_K", 5)
+
+    print(
+        f"RAG retriever mode={retriever_mode} "
+        f"k_hybrid={k_hybrid} k_expansion={k_expansion} "
+        f"k_rerank={k_rerank}"
     )
 
-    # Alternative: Hybrid retriever
-    # hybrid_retriever = HybridRetriever(
-    #     vectorstore=vectorstore,
-    #     documents=documents,
-    #     k=5
-    # )
+    if retriever_mode == "expansion":
+        base_retriever = QueryExpansionRetriever(
+            vectorstore=vectorstore,
+            llm=llm,
+            k=k_expansion,
+        )
+    else:
+        base_retriever = HybridRetriever(
+            vectorstore=vectorstore,
+            documents=documents,
+            k=k_hybrid,
+        )
+
+    reranking_retriever = RerankingRetriever(
+        base_retriever=base_retriever,
+        top_k=k_rerank,
+    )
 
     # RAG Prompt
     rag_prompt = PromptTemplate.from_template(
