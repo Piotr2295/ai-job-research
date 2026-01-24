@@ -3,6 +3,7 @@ Advanced RAG Pipeline Implementation
 Demonstrates LangChain pipeline building and RAG flows for job requirements
 """
 
+import logging
 import os
 from typing import List, Dict, Any
 from langchain_core.vectorstores import VectorStore
@@ -20,6 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize components
+logger = logging.getLogger(__name__)
 embeddings = OpenAIEmbeddings()
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
@@ -190,10 +192,12 @@ def create_advanced_rag_chain(vectorstore: VectorStore, documents: List[Document
     k_expansion = get_env_int("RAG_EXPANSION_K", 10)
     k_rerank = get_env_int("RAG_RERANK_K", 5)
 
-    print(
-        f"RAG retriever mode={retriever_mode} "
-        f"k_hybrid={k_hybrid} k_expansion={k_expansion} "
-        f"k_rerank={k_rerank}"
+    logger.info(
+        "RAG retriever mode=%s k_hybrid=%d k_expansion=%d k_rerank=%d",
+        retriever_mode,
+        k_hybrid,
+        k_expansion,
+        k_rerank,
     )
 
     if retriever_mode == "expansion":
@@ -470,10 +474,10 @@ def test_advanced_rag_pipeline():
     rag_chain = create_advanced_rag_chain(vectorstore, test_docs)
     answer = rag_chain.invoke("Explain how RAG works")
 
-    print("Advanced RAG Pipeline Test Results:")
-    print(f"Query Expansion Results: {len(expanded_results)} documents")
-    print(f"Re-ranked Results: {len(reranked_results)} documents")
-    print(f"RAG Answer: {answer[:200]}...")
+    logger.info("Advanced RAG Pipeline Test Results:")
+    logger.info(f"Query Expansion Results: {len(expanded_results)} documents")
+    logger.info(f"Re-ranked Results: {len(reranked_results)} documents")
+    logger.info(f"RAG Answer: {answer[:200]}...")
 
     return {
         "expanded_results": expanded_results,

@@ -1,13 +1,17 @@
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_pinecone import PineconeVectorStore
-from langchain_core.documents import Document
-import os
 from .advanced_rag import (
     create_advanced_rag_chain,
     RAGEvaluator,
     create_document_processing_pipeline,
 )
+
+import logging
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.documents import Document
+import os
+
+logger = logging.getLogger(__name__)
 
 # Sample documents for RAG
 SAMPLE_DOCS = [
@@ -114,10 +118,10 @@ def get_vector_store():
     use_pinecone = os.getenv("USE_PINECONE", "false").lower() == "true"
 
     if use_pinecone and os.getenv("PINECONE_API_KEY"):
-        print("Using Pinecone vector store (persistent)")
+        logger.info("Using Pinecone vector store (persistent)")
         return get_pinecone_vector_store()
     else:
-        print("Using FAISS vector store (local)")
+        logger.info("Using FAISS vector store (local)")
         return get_faiss_vector_store()
 
 
@@ -140,7 +144,7 @@ def add_document(content: str, metadata: dict = None):
 
     doc = Document(page_content=content, metadata=metadata or {})
     vector_store.add_documents([doc])
-    print(f"Added document: {content[:50]}...")
+    logger.debug(f"Added document: {content[:50]}...")
 
 
 def add_documents_to_store(documents: list[Document]):
@@ -150,7 +154,7 @@ def add_documents_to_store(documents: list[Document]):
         vector_store = get_vector_store()
 
     vector_store.add_documents(documents)
-    print(f"Added {len(documents)} documents to vector store")
+    logger.info(f"Added {len(documents)} documents to vector store")
 
 
 # Advanced RAG Components
