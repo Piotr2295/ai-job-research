@@ -236,13 +236,29 @@ function App() {
   const searchJobs = async () => {
     try {
       const response = await fetch(`http://localhost:8000/api/search-jobs?keyword=${encodeURIComponent(jobKeyword)}&location=${encodeURIComponent(jobLocation)}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
       const data = await response.json();
-      setJobResults(data.jobs || []);
+
+      // Check if the response contains an error
+      if (data.error) {
+        let errorMessage = data.message || 'An error occurred';
+        const reason = data.reason ? `(${data.reason})` : '';
+        const details = data.details ? `\n\n${data.details}` : '';
+        alert(`${errorMessage} ${reason}${details}`);
+        setJobResults([]);
+        return;
+      }
+
+      // Success case
+      if (data.jobs && data.jobs.length > 0) {
+        setJobResults(data.jobs);
+        alert(`Found ${data.jobs.length} job(s) matching your search!`);
+      } else {
+        setJobResults([]);
+        alert(data.details || 'No jobs found matching your search criteria.');
+      }
     } catch (err) {
       alert('Error searching jobs: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      setJobResults([]);
     }
   };
 
