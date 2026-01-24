@@ -45,6 +45,66 @@ def get_db_connection():
     return sqlite3.connect(DB_PATH)
 
 
+def init_db():
+    """Initialize database tables"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Create job_analyses table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            job_title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            skills_required TEXT NOT NULL,
+            skill_gaps TEXT NOT NULL,
+            learning_plan TEXT NOT NULL,
+            analysis_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, job_title, company)
+        )
+        """
+    )
+
+    # Create learning_progress table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS learning_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            skill TEXT NOT NULL,
+            progress_percentage INTEGER DEFAULT 0,
+            completed_modules TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, skill)
+        )
+        """
+    )
+
+    # Create parsed_resumes table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS parsed_resumes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            full_text TEXT NOT NULL,
+            sections TEXT,
+            extracted_experiences TEXT,
+            upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# Initialize database on startup
+init_db()
+
+
 @app.get("/")
 async def root():
     return {"message": "AI Job Research & Summary Agent API"}
