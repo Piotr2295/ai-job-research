@@ -103,6 +103,10 @@ function App() {
   const [ragQuestion, setRagQuestion] = useState('');
   const [ragResponse, setRagResponse] = useState<any>(null);
   const [ragMetrics, setRagMetrics] = useState<any>(null);
+  const [expandedAccordion, setExpandedAccordion] = useState<string | null>('pipeline');
+  const [ragLoading, setRagLoading] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [jobSearchLoading, setJobSearchLoading] = useState(false);
 
   // File Management state
   const [fileName, setFileName] = useState('');
@@ -234,6 +238,7 @@ function App() {
   };
 
   const searchJobs = async () => {
+    setJobSearchLoading(true);
     try {
       const response = await fetch(`http://localhost:8000/api/search-jobs?keyword=${encodeURIComponent(jobKeyword)}&location=${encodeURIComponent(jobLocation)}`);
       const data = await response.json();
@@ -259,6 +264,8 @@ function App() {
     } catch (err) {
       alert('Error searching jobs: ' + (err instanceof Error ? err.message : 'Unknown error'));
       setJobResults([]);
+    } finally {
+      setJobSearchLoading(false);
     }
   };
 
@@ -427,6 +434,7 @@ function App() {
       return;
     }
 
+    setRagLoading(true);
     try {
       const response = await fetch('http://localhost:8000/api/advanced-rag-query', {
         method: 'POST',
@@ -444,12 +452,16 @@ function App() {
 
       const data = await response.json();
       setRagResponse(data);
+      setExpandedAccordion('evaluation');
     } catch (err) {
-      alert('Error querying advanced RAG: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      alert('Error querying RAG: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setRagLoading(false);
     }
   };
 
   const loadRAGMetrics = async () => {
+    setMetricsLoading(true);
     try {
       const response = await fetch('http://localhost:8000/api/rag-performance-metrics');
       if (!response.ok) {
@@ -459,7 +471,9 @@ function App() {
       const data = await response.json();
       setRagMetrics(data);
     } catch (err) {
-      alert('Error loading RAG metrics: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error loading RAG metrics:', err);
+    } finally {
+      setMetricsLoading(false);
     }
   };
 
@@ -794,10 +808,24 @@ function App() {
                   placeholder="e.g., San Francisco"
                 />
               </div>
-              <button onClick={searchJobs} className="submit-btn">
-                Search Jobs
+              <button onClick={searchJobs} className="submit-btn" disabled={jobSearchLoading}>
+                {jobSearchLoading ? (
+                  <>
+                    <span className="spinner"></span>
+                    Searching...
+                  </>
+                ) : (
+                  'Search Jobs'
+                )}
               </button>
             </div>
+
+            {jobSearchLoading && (
+              <div className="loading-container">
+                <div className="spinner-large"></div>
+                <p>Searching for job opportunities...</p>
+              </div>
+            )}
 
             {jobResults.length > 0 && (
               <div className="job-results">
@@ -1127,48 +1155,8 @@ function App() {
               </p>
 
               <div className="rag-section">
-                <h3>Pipeline Status & Capabilities</h3>
-                {ragMetrics && (
-                  <div className="pipeline-info">
-                    <div className="status-indicator">
-                      <span className={`status ${ragMetrics.pipeline_status === 'active' ? 'active' : 'inactive'}`}>
-                        {ragMetrics.pipeline_status === 'active' ? '🟢 Active' : '🔴 Inactive'}
-                      </span>
-                    </div>
-
-                    <div className="capabilities">
-                      <h4>Advanced Components:</h4>
-                      <ul>
-                        {ragMetrics.components?.map((component: string, index: number) => (
-                          <li key={index}>{component}</li>
-                        ))}
-                      </ul>
-
-                      <h4>Key Capabilities:</h4>
-                      <ul>
-                        {ragMetrics.capabilities?.map((capability: string, index: number) => (
-                          <li key={index}>{capability}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {ragMetrics.test_results && (
-                      <div className="test-results">
-                        <h4>Pipeline Test Results:</h4>
-                        <ul>
-                          <li>Query Expansion: {ragMetrics.test_results.expanded_results_count} results</li>
-                          <li>Re-ranking: {ragMetrics.test_results.reranked_results_count} results</li>
-                          <li>Answer Preview: {ragMetrics.test_results.answer_preview}</li>
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="rag-section">
                 <h3>Query Advanced RAG</h3>
-                <div className="rag-query-form">
+                  <div className="rag-query-form">
                   <div className="form-group">
                     <label>Ask a complex question about career development:</label>
                     <textarea
@@ -1178,10 +1166,28 @@ function App() {
                       rows={3}
                     />
                   </div>
-                  <button onClick={queryAdvancedRAG} className="submit-btn">
-                    Query Advanced RAG
+                  <button onClick={queryAdvancedRAG} className="submit-btn" disabled={ragLoading}>
+                    {ragLoading ? (
+                      <>
+                        <span className="spinner"></span>
+                        Processing Query...
+                      </>
+                    ) : (
+                      'Query Advanced RAG'
+                    )}
                   </button>
+                  <div className="info-hint">
+                    <p>💡 <strong>Tip:</strong> After running a query, check the "Performance Evaluation & Quality Metrics" section below to see detailed analytics about the RAG pipeline's performance!</p>
+                  </div>
                 </div>
+
+                {ragLoading && (
+                  <div className="loading-container">
+                    <div className="spinner-large"></div>
+                    <p>Processing your query with advanced RAG pipeline...</p>
+                    <p className="loading-sub">This includes query expansion, semantic search, and AI re-ranking</p>
+                  </div>
+                )}
 
                 {ragResponse && (
                   <div className="rag-results">
@@ -1207,29 +1213,105 @@ function App() {
                     </div>
 
                     {ragResponse.evaluation && (
-                      <div className="result-section">
-                        <h5>Performance Evaluation:</h5>
-                        <div className="evaluation-details">
-                          {ragResponse.evaluation.generation_metrics && (
-                            <div>
-                              <h6>Generation Metrics:</h6>
-                              <ul>
-                                <li>Response Length: {ragResponse.evaluation.generation_metrics.response_length} characters</li>
-                                <li>Context Docs Used: {ragResponse.evaluation.generation_metrics.context_docs_used}</li>
-                              </ul>
-                            </div>
-                          )}
-                          <div>
-                            <h6>LLM Evaluation:</h6>
-                            <div className="evaluation-text">
-                              {ragResponse.evaluation.generation_metrics?.evaluation || 'Evaluation in progress...'}
+                      <div className="accordion-item">
+                        <div className="accordion-header" onClick={() => setExpandedAccordion(expandedAccordion === 'evaluation' ? null : 'evaluation')}>
+                          <span className="accordion-title">
+                            {expandedAccordion === 'evaluation' ? '▼' : '▶'} Performance Evaluation & Quality Metrics
+                          </span>
+                        </div>
+                        {expandedAccordion === 'evaluation' && (
+                          <div className="accordion-content">
+                            <div className="evaluation-grid">
+                              {ragResponse.evaluation.generation_metrics && (
+                                <div className="metric-box">
+                                  <div className="metric-label">Generation Metrics</div>
+                                  <div className="metric-content">
+                                    <div className="metric-item">
+                                      <span className="metric-name">Response Length:</span>
+                                      <span className="metric-value">{ragResponse.evaluation.generation_metrics.response_length} characters</span>
+                                    </div>
+                                    <div className="metric-item">
+                                      <span className="metric-name">Context Docs Used:</span>
+                                      <span className="metric-value">{ragResponse.evaluation.generation_metrics.context_docs_used}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="metric-box">
+                                <div className="metric-label">LLM Quality Evaluation</div>
+                                <div className="llm-evaluation">
+                                  {ragResponse.evaluation.generation_metrics?.evaluation || 'Evaluation in progress...'}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="rag-section">
+                <div className="accordion-item">
+                  <div className="accordion-header" onClick={() => setExpandedAccordion(expandedAccordion === 'pipeline' ? null : 'pipeline')}>
+                    <span className="accordion-title">
+                      {expandedAccordion === 'pipeline' ? '▼' : '▶'} For Developers - Pipeline Status & Architecture
+                    </span>
+                  </div>
+                  {expandedAccordion === 'pipeline' && (
+                    <div className="accordion-content">
+                      {metricsLoading ? (
+                        <div className="loading-container">
+                          <div className="spinner-large"></div>
+                          <p>Loading pipeline information...</p>
+                        </div>
+                      ) : ragMetrics ? (
+                        <div className="pipeline-status-grid">
+                          <div className="status-box">
+                            <div className="status-label">Pipeline Status</div>
+                            <span className={`status-badge ${ragMetrics.pipeline_status === 'active' ? 'active' : 'inactive'}`}>
+                              {ragMetrics.pipeline_status === 'active' ? 'ACTIVE' : 'INACTIVE'}
+                            </span>
+                          </div>
+
+                          <div className="info-box">
+                            <div className="section-label">Advanced Components</div>
+                            <ul className="component-list">
+                              {ragMetrics.components?.map((component: string, index: number) => (
+                                <li key={index}><code>{component}</code></li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="info-box">
+                            <div className="section-label">Key Capabilities</div>
+                            <ul className="capabilities-list">
+                              {ragMetrics.capabilities?.map((capability: string, index: number) => (
+                                <li key={index}>{capability}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          {ragMetrics.test_results && (
+                            <div className="info-box">
+                              <div className="section-label">Pipeline Test Results</div>
+                              <ul className="test-results-list">
+                                <li><strong>Query Expansion:</strong> {ragMetrics.test_results.expanded_results_count} results</li>
+                                <li><strong>Re-ranking:</strong> {ragMetrics.test_results.reranked_results_count} results</li>
+                                <li><strong>Answer Preview:</strong> {ragMetrics.test_results.answer_preview}</li>
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="info-box">
+                          <p style={{margin: 0, color: '#666'}}>Unable to load pipeline information. Please try refreshing or contact support.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
