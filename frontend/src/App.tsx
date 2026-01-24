@@ -1177,7 +1177,7 @@ function App() {
                     )}
                   </button>
                   <div className="info-hint">
-                    <p>💡 <strong>Tip:</strong> After running a query, check the "Performance Evaluation & Quality Metrics" section below to see detailed analytics about the RAG pipeline's performance!</p>
+                    <p><strong>Tip:</strong> After running a query, check the "Performance Evaluation & Quality Metrics" section below to see detailed analytics about the RAG pipeline's performance!</p>
                   </div>
                 </div>
 
