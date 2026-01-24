@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,11 +39,130 @@ app.add_middleware(
 
 # Database setup
 DB_PATH = Path(__file__).parent.parent / "mcp-server" / "job_research.db"
+CV_STORAGE_PATH = Path(__file__).parent.parent / "cv_storage"
+
+# Create CV storage directory if it doesn't exist
+CV_STORAGE_PATH.mkdir(exist_ok=True)
 
 
 def get_db_connection():
     """Get database connection"""
     return sqlite3.connect(DB_PATH)
+
+
+def init_db():
+    """Initialize database tables"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Create job_analyses table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            job_title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            skills_required TEXT NOT NULL,
+            skill_gaps TEXT NOT NULL,
+            learning_plan TEXT NOT NULL,
+            analysis_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, job_title, company)
+        )
+        """
+    )
+
+    # Create learning_progress table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS learning_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            skill TEXT NOT NULL,
+            progress_percentage INTEGER DEFAULT 0,
+            completed_modules TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, skill)
+        )
+        """
+    )
+
+    # Create parsed_resumes table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS parsed_resumes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            full_text TEXT NOT NULL,
+            sections TEXT,
+            extracted_experiences TEXT,
+            upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            file_path TEXT
+        )
+        """
+    )
+
+    # Add file_path column if it doesn't exist (migration for existing databases)
+    cursor.execute("PRAGMA table_info(parsed_resumes)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if "file_path" not in columns:
+        cursor.execute("ALTER TABLE parsed_resumes ADD COLUMN file_path TEXT")
+        logger.info("Added file_path column to parsed_resumes table")
+
+    # Create cv_metadata table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cv_metadata (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            resume_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            file_size INTEGER,
+            file_hash TEXT,
+            upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active INTEGER DEFAULT 1,
+            notes TEXT,
+            version INTEGER DEFAULT 1,
+            FOREIGN KEY (resume_id) REFERENCES parsed_resumes(id),
+            UNIQUE(user_id, file_hash)
+        )
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def compute_file_hash(file_content: bytes) -> str:
+    """Compute SHA256 hash of file content"""
+    return hashlib.sha256(file_content).hexdigest()
+
+
+def save_cv_file(user_id: str, file_content: bytes, original_filename: str) -> str:
+    """Save CV file to local storage and return the path"""
+    # Create user-specific directory
+    user_cv_dir = CV_STORAGE_PATH / user_id
+    user_cv_dir.mkdir(exist_ok=True)
+
+    # Generate filename with timestamp
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"{timestamp}_{original_filename}"
+    file_path = user_cv_dir / safe_filename
+
+    # Save file
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+
+    return str(file_path)
+
+
+# Initialize database on startup
+init_db()
 
 
 @app.get("/")
@@ -585,9 +705,62 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
         # Add to vector store
         add_documents_to_store(documents)
 
+        # Save CV file locally
+        file_path = save_cv_file(user_id, file_content, file.filename)
+        file_size = len(file_content)
+        file_hash = compute_file_hash(file_content)
+
+        # Save to database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        logger.info(f"Saving resume for user: {user_id}, filename: {file.filename}")
+        logger.info(f"Full text length: {len(parsed_data['full_text'])}")
+        logger.info(f"Sections: {list(parsed_data['sections'].keys())}")
+        logger.info(f"Experiences: {len(parsed_data['extracted_experiences'])}")
+
+        # Insert into parsed_resumes
+        cursor.execute(
+            """
+            INSERT INTO parsed_resumes
+            (user_id, filename, full_text, sections, extracted_experiences, file_path)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                file.filename,
+                parsed_data["full_text"],
+                json.dumps(parsed_data["sections"]),
+                json.dumps(
+                    [exp.dict() for exp in parsed_data["extracted_experiences"]]
+                ),
+                file_path,
+            ),
+        )
+
+        resume_id = cursor.lastrowid
+        logger.info(f"Resume inserted with ID: {resume_id}")
+
+        # Insert into cv_metadata
+        cursor.execute(
+            """
+            INSERT INTO cv_metadata
+            (resume_id, user_id, file_path, original_filename, file_size, file_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (resume_id, user_id, file_path, file.filename, file_size, file_hash),
+        )
+
+        conn.commit()
+        conn.close()
+
         # Return parsed resume data
         return {
             "message": "Resume uploaded and parsed successfully",
+            "resume_id": resume_id,
+            "file_path": file_path,
+            "file_hash": file_hash,
+            "file_size": file_size,
             "parsed_resume": {
                 "user_id": user_id,
                 "filename": file.filename,
@@ -606,6 +779,138 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error uploading resume: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error uploading resume: {str(e)}")
+
+
+@app.get("/api/cv-metadata/{user_id}")
+async def get_cv_metadata(user_id: str):
+    """Retrieve CV metadata for a user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, resume_id, original_filename, file_size, file_hash,
+                   upload_date, is_active, notes, version
+            FROM cv_metadata
+            WHERE user_id = ?
+            ORDER BY upload_date DESC
+            """,
+            (user_id,),
+        )
+
+        columns = [description[0] for description in cursor.description]
+        cvs = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        conn.close()
+
+        return {"user_id": user_id, "cv_count": len(cvs), "cvs": cvs}
+    except Exception as e:
+        logger.error(f"Error retrieving CV metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving CV metadata: {str(e)}"
+        )
+
+
+@app.get("/api/parsed-resumes/{user_id}")
+async def get_parsed_resumes(user_id: str):
+    """Get all parsed resumes for a user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, user_id, filename, upload_date, file_path
+            FROM parsed_resumes
+            WHERE user_id = ?
+            ORDER BY upload_date DESC
+            """,
+            (user_id,),
+        )
+
+        columns = [description[0] for description in cursor.description]
+        resumes = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        conn.close()
+
+        logger.info(f"Found {len(resumes)} parsed resumes for user {user_id}")
+        return {"user_id": user_id, "count": len(resumes), "resumes": resumes}
+    except Exception as e:
+        logger.error(f"Error retrieving parsed resumes: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving parsed resumes: {str(e)}"
+        )
+
+
+@app.put("/api/cv-metadata/{metadata_id}")
+async def update_cv_metadata(metadata_id: int, notes: str = "", is_active: int = 1):
+    """Update CV metadata (notes, active status)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            UPDATE cv_metadata
+            SET notes = ?, is_active = ?, last_updated = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (notes, is_active, metadata_id),
+        )
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "message": "CV metadata updated successfully",
+            "metadata_id": metadata_id,
+        }
+    except Exception as e:
+        logger.error(f"Error updating CV metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error updating CV metadata: {str(e)}"
+        )
+
+
+@app.get("/api/resume/{resume_id}")
+async def get_resume(resume_id: int):
+    """Retrieve parsed resume data"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, user_id, filename, full_text, sections,
+                   extracted_experiences, upload_date, file_path
+            FROM parsed_resumes
+            WHERE id = ?
+            """,
+            (resume_id,),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Resume not found")
+
+        columns = [description[0] for description in cursor.description]
+        resume_data = dict(zip(columns, row))
+
+        # Parse JSON fields
+        resume_data["sections"] = json.loads(resume_data["sections"])
+        resume_data["extracted_experiences"] = json.loads(
+            resume_data["extracted_experiences"]
+        )
+
+        return resume_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving resume: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving resume: {str(e)}"
+        )
 
 
 @app.post("/api/advanced-rag-query")
