@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
@@ -20,6 +21,8 @@ from app.agent import agent
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Job Research & Summary Agent")
 
@@ -422,16 +425,16 @@ async def add_user_experience(request: AddUserExperienceRequest):
 async def optimize_resume(request: ResumeOptimizationRequest):
     """Generate resume optimization suggestions based on job requirements and user experience"""
     try:
-        print("Starting optimize_resume endpoint")
+        logger.info("Starting optimize_resume endpoint")
         from app.rag import retrieve_resources
 
         # from app.agent import agent  # Already imported at top
 
-        print("Retrieving user experience")
+        logger.info("Retrieving user experience")
         # Retrieve user's relevant experience
         user_experience_query = f"experience {request.user_id} {request.target_role}"
         relevant_experiences = retrieve_resources(user_experience_query, k=5)
-        print(f"Retrieved {len(relevant_experiences)} experiences")
+        logger.info(f"Retrieved {len(relevant_experiences)} experiences")
 
         # Create optimization prompt
         optimization_state = {
@@ -441,12 +444,12 @@ async def optimize_resume(request: ResumeOptimizationRequest):
             "user_experiences": relevant_experiences,
             "task": "resume_optimization",
         }
-        print("Created optimization state")
+        logger.info("Created optimization state")
 
         # Use the agent to generate optimization suggestions
-        print("Invoking agent")
+        logger.info("Invoking agent")
         result = agent.invoke(optimization_state)
-        print("Agent completed successfully")
+        logger.info("Agent completed successfully")
 
         return {
             "optimized_resume_sections": result.get("resume_sections", []),
@@ -455,10 +458,7 @@ async def optimize_resume(request: ResumeOptimizationRequest):
             "experience_matches": relevant_experiences,
         }
     except Exception as e:
-        print(f"Error in optimize_resume: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Error in optimize_resume: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error optimizing resume: {str(e)}"
         )
@@ -541,10 +541,7 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        print(f"Error uploading resume: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Error uploading resume: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error uploading resume: {str(e)}")
 
 
@@ -572,10 +569,7 @@ async def advanced_rag_query(request: dict):
         }
 
     except Exception as e:
-        print(f"Error in advanced RAG query: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Error in advanced RAG query: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error in advanced RAG query: {str(e)}"
         )
@@ -612,10 +606,7 @@ async def get_rag_performance_metrics():
         }
 
     except Exception as e:
-        print(f"Error getting RAG metrics: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Error getting RAG metrics: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error getting RAG metrics: {str(e)}"
         )
