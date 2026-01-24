@@ -105,6 +105,7 @@ function App() {
   const [ragMetrics, setRagMetrics] = useState<any>(null);
   const [expandedAccordion, setExpandedAccordion] = useState<string | null>('pipeline');
   const [ragLoading, setRagLoading] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [jobSearchLoading, setJobSearchLoading] = useState(false);
 
   // File Management state
@@ -460,6 +461,7 @@ function App() {
   };
 
   const loadRAGMetrics = async () => {
+    setMetricsLoading(true);
     try {
       const response = await fetch('http://localhost:8000/api/rag-performance-metrics');
       if (!response.ok) {
@@ -469,7 +471,9 @@ function App() {
       const data = await response.json();
       setRagMetrics(data);
     } catch (err) {
-      alert('Error loading RAG metrics: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error loading RAG metrics:', err);
+    } finally {
+      setMetricsLoading(false);
     }
   };
 
@@ -1255,45 +1259,56 @@ function App() {
                       {expandedAccordion === 'pipeline' ? '▼' : '▶'} For Developers - Pipeline Status & Architecture
                     </span>
                   </div>
-                  {expandedAccordion === 'pipeline' && ragMetrics && (
+                  {expandedAccordion === 'pipeline' && (
                     <div className="accordion-content">
-                      <div className="pipeline-status-grid">
-                        <div className="status-box">
-                          <div className="status-label">Pipeline Status</div>
-                          <span className={`status-badge ${ragMetrics.pipeline_status === 'active' ? 'active' : 'inactive'}`}>
-                            {ragMetrics.pipeline_status === 'active' ? '🟢 Active' : '🔴 Inactive'}
-                          </span>
+                      {metricsLoading ? (
+                        <div className="loading-container">
+                          <div className="spinner-large"></div>
+                          <p>Loading pipeline information...</p>
                         </div>
+                      ) : ragMetrics ? (
+                        <div className="pipeline-status-grid">
+                          <div className="status-box">
+                            <div className="status-label">Pipeline Status</div>
+                            <span className={`status-badge ${ragMetrics.pipeline_status === 'active' ? 'active' : 'inactive'}`}>
+                              {ragMetrics.pipeline_status === 'active' ? 'ACTIVE' : 'INACTIVE'}
+                            </span>
+                          </div>
 
-                        <div className="info-box">
-                          <div className="section-label">Advanced Components</div>
-                          <ul className="component-list">
-                            {ragMetrics.components?.map((component: string, index: number) => (
-                              <li key={index}><code>{component}</code></li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="info-box">
-                          <div className="section-label">Key Capabilities</div>
-                          <ul className="capabilities-list">
-                            {ragMetrics.capabilities?.map((capability: string, index: number) => (
-                              <li key={index}>{capability}</li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        {ragMetrics.test_results && (
                           <div className="info-box">
-                            <div className="section-label">Pipeline Test Results</div>
-                            <ul className="test-results-list">
-                              <li><strong>Query Expansion:</strong> {ragMetrics.test_results.expanded_results_count} results</li>
-                              <li><strong>Re-ranking:</strong> {ragMetrics.test_results.reranked_results_count} results</li>
-                              <li><strong>Answer Preview:</strong> {ragMetrics.test_results.answer_preview}</li>
+                            <div className="section-label">Advanced Components</div>
+                            <ul className="component-list">
+                              {ragMetrics.components?.map((component: string, index: number) => (
+                                <li key={index}><code>{component}</code></li>
+                              ))}
                             </ul>
                           </div>
-                        )}
-                      </div>
+
+                          <div className="info-box">
+                            <div className="section-label">Key Capabilities</div>
+                            <ul className="capabilities-list">
+                              {ragMetrics.capabilities?.map((capability: string, index: number) => (
+                                <li key={index}>{capability}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          {ragMetrics.test_results && (
+                            <div className="info-box">
+                              <div className="section-label">Pipeline Test Results</div>
+                              <ul className="test-results-list">
+                                <li><strong>Query Expansion:</strong> {ragMetrics.test_results.expanded_results_count} results</li>
+                                <li><strong>Re-ranking:</strong> {ragMetrics.test_results.reranked_results_count} results</li>
+                                <li><strong>Answer Preview:</strong> {ragMetrics.test_results.answer_preview}</li>
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="info-box">
+                          <p style={{margin: 0, color: '#666'}}>Unable to load pipeline information. Please try refreshing or contact support.</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
