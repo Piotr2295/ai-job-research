@@ -166,3 +166,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# CV Storage - ignore user CV files but keep directory
+cv_storage/*
+!cv_storage/.gitkeep
