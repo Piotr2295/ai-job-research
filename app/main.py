@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import httpx
 from app.agent import agent
+from app.rag import retrieve_resources
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -295,8 +296,13 @@ async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
         api_key = os.getenv("RAPIDAPI_KEY")
 
         if not api_key:
+            logger.warning("RAPIDAPI_KEY not set in environment")
             return {
-                "error": "RAPIDAPI_KEY environment variable not set. Job search unavailable."
+                "error": True,
+                "message": "Job search is currently unavailable",
+                "reason": "Missing API Key Configuration",
+                "details": "The RapidAPI key for job search is not configured on the server. Please contact the administrator to set up the RAPIDAPI_KEY environment variable.",
+                "jobs": [],
             }
 
         querystring = {
@@ -310,17 +316,64 @@ async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
 
-        async with httpx.AsyncClient() as client:
+        logger.info(
+            f"Searching jobs: keyword={keyword}, location={location}, limit={limit}"
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, headers=headers, params=querystring)
+
+            if response.status_code == 401 or response.status_code == 403:
+                logger.error(
+                    f"JSearch API authentication failed: status={response.status_code}"
+                )
+                return {
+                    "error": True,
+                    "message": "Job search is currently unavailable",
+                    "reason": "Invalid API Key",
+                    "details": "The RapidAPI key is invalid, expired, or has insufficient permissions. Please verify the key is correct and has access to the JSearch API.",
+                    "jobs": [],
+                }
+
+            if response.status_code == 429:
+                logger.error(
+                    f"JSearch API rate limit exceeded: status={response.status_code}"
+                )
+                return {
+                    "error": True,
+                    "message": "Job search temporarily unavailable",
+                    "reason": "Rate Limit Exceeded",
+                    "details": "The job search service has reached its request limit. Please try again in a few moments.",
+                    "jobs": [],
+                }
+
+            if response.status_code != 200:
+                logger.error(
+                    f"JSearch API error: status={response.status_code}, "
+                    f"body={response.text}"
+                )
+                return {
+                    "error": True,
+                    "message": "Job search service error",
+                    "reason": f"API Error (Status {response.status_code})",
+                    "details": "An error occurred while searching for jobs. Please try again later.",
+                    "jobs": [],
+                }
+
             data = response.json()
 
-        if "data" not in data:
+        if "data" not in data or not data["data"]:
+            logger.info("No jobs found matching the search criteria")
             return {
+                "error": False,
+                "message": "No jobs found",
+                "reason": "No Results",
+                "details": f"No job postings found matching '{keyword}' {f'in {location}' if location else ''}. Try different keywords or check the spelling.",
                 "jobs": [],
-                "message": "No job postings found or API limit reached.",
             }
 
         jobs = data["data"][:limit]
+        logger.info(f"Found {len(jobs)} jobs from JSearch API")
 
         results = []
         for job in jobs:
@@ -334,12 +387,26 @@ async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
                 }
             )
 
-        return {"jobs": results}
+        return {"error": False, "message": "Success", "jobs": results}
 
+    except httpx.TimeoutException:
+        logger.error("JSearch API request timed out")
+        return {
+            "error": True,
+            "message": "Job search request timed out",
+            "reason": "Connection Timeout",
+            "details": "The job search service took too long to respond. Please try again.",
+            "jobs": [],
+        }
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error searching job postings: {str(e)}"
-        )
+        logger.error(f"Error searching job postings: {str(e)}", exc_info=True)
+        return {
+            "error": True,
+            "message": "Job search service error",
+            "reason": "Unexpected Error",
+            "details": "An unexpected error occurred while searching for jobs. Please try again later.",
+            "jobs": [],
+        }
 
 
 @app.post("/api/save-file")
@@ -426,10 +493,6 @@ async def optimize_resume(request: ResumeOptimizationRequest):
     """Generate resume optimization suggestions based on job requirements and user experience"""
     try:
         logger.info("Starting optimize_resume endpoint")
-        from app.rag import retrieve_resources
-
-        # from app.agent import agent  # Already imported at top
-
         logger.info("Retrieving user experience")
         # Retrieve user's relevant experience
         user_experience_query = f"experience {request.user_id} {request.target_role}"
