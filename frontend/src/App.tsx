@@ -199,6 +199,8 @@ function App() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Move to analysis-in-progress state so the spinner shows
+    setCurrentStep(3);
     setIsLoading(true);
     setError(null);
 
@@ -228,6 +230,122 @@ function App() {
       setCurrentStep(0); // Reset on error
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Demo mode: run real job search & real analysis with sample CV
+  const runDemo = async () => {
+    try {
+      // Step 1: simulate CV upload with enhanced skills
+      setCurrentStep(1);
+      setUploadStatus('Uploading...');
+      const demoSkills = {
+        technical_skills: ['Python', 'JavaScript', 'TypeScript', 'FastAPI', 'Flask', 'Django', 'React', 'Vue.js', 'Node.js', 'GraphQL', 'REST APIs', 'SQL', 'PostgreSQL', 'MongoDB'],
+        tools: ['Docker', 'Docker Compose', 'Kubernetes', 'GitHub Actions', 'Jenkins', 'Git', 'AWS', 'GCP', 'Linux', 'Nginx', 'Redis', 'Elasticsearch'],
+        languages: ['English', 'Polish']
+      } as any;
+      await new Promise(res => setTimeout(res, 500));
+      setCvSkills(demoSkills);
+      setUploadStatus('Demo CV loaded');
+      setSuggestedRoles(['Full Stack Engineer', 'Backend Developer', 'Platform Engineer']);
+      setNotification({type: 'success', message: 'Step 1: CV uploaded with enhanced skills! Searching jobs in 1 sec...'});
+      await new Promise(res => setTimeout(res, 1000));
+
+      // Step 2: real job search
+      setJobKeyword('Full Stack Engineer');
+      setJobLocation('Remote');
+      setJobSearchLoading(true);
+      setNotification({type: 'info', message: 'Step 2: Searching for live Full Stack Engineer positions...'});
+      const jobResp = await fetch(`http://localhost:8000/api/search-jobs?keyword=${encodeURIComponent('Full Stack Engineer')}&location=${encodeURIComponent('Remote')}`);
+      const jobData = await jobResp.json();
+      setJobSearchLoading(false);
+
+      if (!jobResp.ok || !jobData.jobs || jobData.jobs.length === 0) {
+        setNotification({type: 'error', message: 'Demo could not find live jobs. Please try again later.'});
+        setTimeout(() => setNotification(null), 4000);
+        return;
+      }
+
+      // Apply skill matching to jobs
+      let jobs = jobData.jobs;
+      if (jobs && jobs.length > 0) {
+        jobs = jobs.map((job: any) => {
+          const allUserSkills = [
+            ...(demoSkills.technical_skills || []),
+            ...(demoSkills.tools || []),
+            ...(demoSkills.languages || [])
+          ].map((s: string) => s.toLowerCase());
+          
+          const jobDesc = (job.description || '').toLowerCase();
+          
+          const matchingSkills = allUserSkills.filter((skill: string) => 
+            jobDesc.includes(skill.toLowerCase())
+          );
+          
+          const matchPercentage = allUserSkills.length > 0 
+            ? Math.round((matchingSkills.length / Math.min(allUserSkills.length, 15)) * 100)
+            : 0;
+          
+          return {
+            ...job,
+            matchPercentage,
+            matchingSkills,
+            totalUserSkills: allUserSkills.length
+          };
+        });
+        
+        jobs.sort((a: any, b: any) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
+      }
+
+      const topJob: JobPosting = jobs[0];
+      setJobResults(jobs);
+      const desc = topJob.description || `${topJob.title} at ${topJob.company}`;
+      setJobDescription(desc);
+      setCurrentSkills([
+        ...(demoSkills.technical_skills || []),
+        ...(demoSkills.tools || []),
+        ...(demoSkills.languages || [])
+      ].join(', '));
+      setCurrentStep(2);
+      setNotification({type: 'success', message: `Found "${topJob.title}" at ${topJob.company}! Analyzing in 1 sec...`});
+      await new Promise(res => setTimeout(res, 1000));
+
+      // Step 3: run real analysis
+      setIsLoading(true);
+      setCurrentStep(3);
+      setNotification({type: 'info', message: 'Step 3: Generating analysis with learning plan...'});
+      const requestData: JobAnalysisRequest = {
+        job_description: desc,
+        current_skills: [
+          ...(demoSkills.technical_skills || []),
+          ...(demoSkills.tools || []),
+          ...(demoSkills.languages || [])
+        ]
+      };
+
+      const analyzeResp = await fetch('http://localhost:8000/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+      });
+
+      if (!analyzeResp.ok) {
+        const txt = await analyzeResp.text();
+        throw new Error(`Analyze failed: ${txt}`);
+      }
+
+      const analyzeData: JobAnalysisResponse = await analyzeResp.json();
+      setResult(analyzeData);
+      setIsLoading(false);
+      setCurrentStep(3);
+      setNotification({type: 'success', message: 'Demo complete! Review skill gaps below and click Save Analysis to keep.'});
+      setTimeout(() => setNotification(null), 5000);
+    } catch (err) {
+      console.error('Demo mode error:', err);
+      setIsLoading(false);
+      setCurrentStep(0);
+      setNotification({type: 'error', message: 'Demo failed. Please try again or run manually.'});
+      setTimeout(() => setNotification(null), 4000);
     }
   };
 
@@ -797,11 +915,13 @@ function App() {
                     }}>
                       {isComplete || (isActive && !isLoadingStep) ? '✓' : (isActive && isLoadingStep ? (
                         <div className="spinner" style={{
-                          width: '20px',
-                          height: '20px',
+                          width: '18px',
+                          height: '18px',
                           border: '3px solid white',
                           borderTop: '3px solid transparent',
-                          borderRadius: '50%'
+                          borderRadius: '50%',
+                          display: 'block',
+                          margin: '0 auto'
                         }}></div>
                       ) : idx + 1)}
                     </div>
@@ -853,14 +973,35 @@ function App() {
                 animation: spin 1s linear infinite;
               }
             `}</style>
+            {/* Demo Mode Button */}
+            <div style={{
+              padding: '1.5rem',
+              marginBottom: '1.5rem',
+              background: 'linear-gradient(135deg, #0277bd 0%, #01579b 100%)',
+              borderRadius: '12px',
+              textAlign: 'center',
+              boxShadow: '0 4px 12px rgba(2, 119, 189, 0.3)',
+              border: '2px solid #0277bd'
+            }}>
+              <p style={{color: 'white', marginTop: 0, marginBottom: '0.75rem', fontSize: '0.95em', fontWeight: '500'}}>
+                Try our interactive demo with a sample CV:
+              </p>
+              <button
+                onClick={runDemo}
+                className="demo-button"
+              >
+                Run Demo Mode
+              </button>
+            </div>
+
             {/* CV Upload and Job Search Section */}
             <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '2px solid #61dafb'}}>
-              <h3 style={{marginTop: 0, color: '#0277bd'}}>🚀 Quick Start: Auto-Fill from Your CV & Job Search</h3>
+              <h3 style={{marginTop: 0, color: '#0277bd'}}>Quick Start: Auto-Fill from Your CV & Job Search</h3>
               <p style={{color: '#666', marginBottom: '1.5rem'}}>Upload your CV and search for jobs to automatically populate the fields below, or fill them manually.</p>
               
               {/* CV Upload */}
               <div style={{marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'white', borderRadius: '8px'}}>
-                <h4 style={{marginTop: 0, fontSize: '1rem'}}>📄 Step 1: Upload Your CV (Optional)</h4>
+                <h4 style={{marginTop: 0, fontSize: '1rem'}}>Step 1: Upload Your CV (Optional)</h4>
                 <div className="form-group">
                   <input
                     type="file"
@@ -1320,7 +1461,7 @@ function App() {
                 </div>
 
                 <div className="result-section">
-                  <h3>📌 Skills Required by This Job:</h3>
+                  <h3>Skills Required by This Job:</h3>
                   <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                     {result.skills_required.map((skill, index) => (
                       <span key={index} style={{
@@ -1556,7 +1697,7 @@ function App() {
             {/* Resume Upload Section */}
             <div className="job-search-form">
               <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px'}}>
-                <h3 style={{marginTop: 0}}>📄 Upload Your Resume (Optional)</h3>
+                <h3 style={{marginTop: 0}}>Upload Your Resume (Optional)</h3>
                 <p style={{color: '#666', marginBottom: '1rem'}}>Upload your CV to help match relevant jobs</p>
                 <div className="form-group">
                   <input
