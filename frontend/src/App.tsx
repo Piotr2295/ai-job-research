@@ -172,6 +172,18 @@ function App() {
   const [readFileName, setReadFileName] = useState('');
   const [readFileContent, setReadFileContent] = useState('');
 
+  // Progress Tracking state
+  const [currentStep, setCurrentStep] = useState<number>(0);
+  const [stepMessages, setStepMessages] = useState<string[]>([
+    'Step 1: Upload CV',
+    'Step 2: Choose Job Description',
+    'Step 3: Generate Analysis',
+    'Step 4: Save Analysis'
+  ]);
+
+  // Notification state
+  const [notification, setNotification] = useState<{type: 'success' | 'error' | 'info', message: string} | null>(null);
+
   const loadSavedAnalyses = useCallback(async () => {
     try {
       const response = await fetch(`http://localhost:8000/api/user-analyses/${userId}`);
@@ -210,8 +222,10 @@ function App() {
 
       const data: JobAnalysisResponse = await response.json();
       setResult(data);
+      setCurrentStep(3); // Analysis generated successfully
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
+      setCurrentStep(0); // Reset on error
     } finally {
       setIsLoading(false);
     }
@@ -243,15 +257,37 @@ function App() {
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Handle specific error codes
+        if (response.status === 409) {
+          // Conflict - duplicate analysis - silently update
+          console.log('Analysis updated:', data.detail);
+          setNotification({type: 'info', message: 'Analysis updated successfully'});
+        } else if (response.status === 503) {
+          // Service unavailable - database locked
+          console.error('Database busy:', data.detail);
+          setNotification({type: 'error', message: 'Database is busy. Please try again shortly.'});
+          return; // Don't mark as complete
+        } else {
+          throw new Error(data.detail || `HTTP error! status: ${response.status}`);
+        }
+      } else {
+        // Success - log it
+        console.log('Analysis saved:', data.message);
+        setNotification({type: 'success', message: 'Analysis saved successfully!'});
       }
 
-      const data = await response.json();
-      alert(data.message);
+      setCurrentStep(4); // Step 4: Analysis saved
+      setTimeout(() => setCurrentStep(0), 2000); // Reset after 2 seconds
+      setTimeout(() => setNotification(null), 4000); // Hide notification after 4 seconds
       loadSavedAnalyses(); // Refresh the list
     } catch (err) {
-      alert('Error saving analysis: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error saving analysis:', err);
+      setNotification({type: 'error', message: 'Error saving analysis. Please try again.'});
+      setTimeout(() => setNotification(null), 4000); // Hide notification after 4 seconds
+      // Don't update step on error
     }
   };
 
@@ -276,9 +312,9 @@ function App() {
       }
 
       const data = await response.json();
-      alert(data.message);
+      console.log('Progress updated:', data.message);
     } catch (err) {
-      alert('Error updating progress: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error updating progress:', err);
     }
   };
 
@@ -305,8 +341,8 @@ function App() {
       if (data.error) {
         let errorMessage = data.message || 'An error occurred';
         const reason = data.reason ? `(${data.reason})` : '';
-        const details = data.details ? `\n\n${data.details}` : '';
-        alert(`${errorMessage} ${reason}${details}`);
+        const details = data.details ? ` ${data.details}` : '';
+        console.warn(`${errorMessage} ${reason}${details}`);
         setJobResults([]);
         return;
       }
@@ -385,9 +421,9 @@ function App() {
       }
 
       const data = await response.json();
-      alert(data.message);
+      console.log('File saved:', data.message);
     } catch (err) {
-      alert('Error saving file: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error saving file:', err);
     }
   };
 
@@ -449,13 +485,13 @@ function App() {
         skills: ''
       });
     } catch (err) {
-      alert('Error adding experience: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Error adding experience:', err);
     }
   };
 
   const optimizeResume = async () => {
     if (!resumeJobDescription || !targetRole) {
-      alert('Please fill in job description and target role');
+      console.warn('Please fill in job description and target role');
       return;
     }
 
@@ -496,10 +532,11 @@ function App() {
 
   const uploadResume = async () => {
     if (!selectedFile) {
-      alert('Please select a PDF file first');
+      console.warn('Please select a PDF file first');
       return;
     }
 
+    setCurrentStep(1);
     setUploadStatus('Uploading...');
     setSuggestedRoles([]);
 
@@ -521,6 +558,7 @@ function App() {
       setParsedResume(data.parsed_resume);
       setUploadedResumeId(data.resume_id); // Store resume ID for enhanced analysis
       setUploadStatus(`✓ ${data.message}`);
+      setCurrentStep(1); // Mark step 1 as complete
       
       // Display suggested roles
       if (data.suggested_roles && data.suggested_roles.length > 0) {
@@ -551,14 +589,14 @@ function App() {
       setSelectedFile(file);
       setUploadStatus('');
     } else {
-      alert('Please select a valid PDF file');
+      console.warn('Please select a valid PDF file');
       setSelectedFile(null);
     }
   };
 
   const queryAdvancedRAG = async () => {
     if (!ragQuestion.trim()) {
-      alert('Please enter a question');
+      console.warn('Please enter a question');
       return;
     }
 
@@ -619,6 +657,47 @@ function App() {
         <p>Comprehensive job analysis, skill tracking, and career development tools</p>
       </header>
 
+      {/* Notification */}
+      {notification && (
+        <div style={{
+          position: 'fixed',
+          top: '100px',
+          right: '20px',
+          zIndex: 1100,
+          padding: '1rem 1.5rem',
+          borderRadius: '6px',
+          backgroundColor: notification.type === 'success' ? '#e8f5e9' : (notification.type === 'error' ? '#ffebee' : '#e3f2fd'),
+          border: `2px solid ${notification.type === 'success' ? '#4caf50' : (notification.type === 'error' ? '#f44336' : '#2196f3')}`,
+          color: notification.type === 'success' ? '#2e7d32' : (notification.type === 'error' ? '#c62828' : '#1565c0'),
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          animation: 'slideIn 0.3s ease',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          maxWidth: '350px'
+        }}>
+          <div style={{fontSize: '1.2em'}}>
+            {notification.type === 'success' ? '✓' : (notification.type === 'error' ? '✕' : 'ℹ')}
+          </div>
+          <div style={{fontSize: '0.9em', fontWeight: '500'}}>
+            {notification.message}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(400px);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
+
       <nav className="navigation">
         <button
           className={activeTab === 'analyze' ? 'nav-btn active' : 'nav-btn'}
@@ -664,9 +743,116 @@ function App() {
         </button>
       </nav>
 
-      <main className="container">
+      {/* Progress Bar - Sticky */}
+      {activeTab === 'analyze' && (
+        <div style={{
+          position: 'sticky',
+          top: '0',
+          left: '0',
+          right: '0',
+          zIndex: 1000,
+          padding: '1rem 2rem',
+          backgroundColor: '#ffffff',
+          borderBottom: '2px solid #e0e0e0',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          margin: '0 -20px 1rem -20px'
+        }}>
+          <div style={{maxWidth: '1200px', margin: '0 auto'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+              <div style={{fontSize: '0.9em', fontWeight: '600', color: '#333'}}>Workflow Progress</div>
+              <div style={{fontSize: '0.8em', color: '#666', fontWeight: '500'}}>{currentStep}/{stepMessages.length} Complete</div>
+            </div>
+            
+            {/* Step Indicators with Circles */}
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '1rem'}}>
+              {stepMessages.map((msg, idx) => {
+                const isComplete = idx + 1 < currentStep;
+                const isActive = idx + 1 === currentStep;
+                const isPending = idx + 1 > currentStep;
+                
+                // Determine if this step is currently loading
+                let isLoadingStep = false;
+                if (idx === 0) { // Step 1: Upload CV
+                  isLoadingStep = uploadStatus === 'Uploading...';
+                } else if (idx === 2) { // Step 3: Generate Analysis
+                  isLoadingStep = isLoading;
+                }
+                
+                return (
+                  <div key={idx} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem'}}>
+                    {/* Circle Indicator */}
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: isComplete ? '#4caf50' : (isActive && !isLoadingStep ? '#4caf50' : (isActive || isLoadingStep ? '#61dafb' : '#ddd')),
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '0.9em',
+                      position: 'relative',
+                      transition: 'all 0.3s ease'
+                    }}>
+                      {isComplete || (isActive && !isLoadingStep) ? '✓' : (isActive && isLoadingStep ? (
+                        <div className="spinner" style={{
+                          width: '20px',
+                          height: '20px',
+                          border: '3px solid white',
+                          borderTop: '3px solid transparent',
+                          borderRadius: '50%'
+                        }}></div>
+                      ) : idx + 1)}
+                    </div>
+                    
+                    {/* Step Label */}
+                    <div style={{
+                      fontSize: '0.7em',
+                      color: isComplete ? '#4caf50' : (isActive ? '#0277bd' : '#999'),
+                      fontWeight: isActive ? '600' : '400',
+                      textAlign: 'center',
+                      lineHeight: '1.2'
+                    }}>
+                      {msg.split(': ')[1]}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Progress Bar */}
+            <div style={{
+              width: '100%',
+              height: '6px',
+              backgroundColor: '#e0e0e0',
+              borderRadius: '3px',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${(currentStep / stepMessages.length) * 100}%`,
+                backgroundColor: '#4caf50',
+                transition: 'width 0.4s ease',
+                borderRadius: '3px'
+              }}></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="container" style={activeTab === 'analyze' ? {} : {}}>
         {activeTab === 'analyze' && (
           <>
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+              .spinner {
+                animation: spin 1s linear infinite;
+              }
+            `}</style>
             {/* CV Upload and Job Search Section */}
             <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '2px solid #61dafb'}}>
               <h3 style={{marginTop: 0, color: '#0277bd'}}>🚀 Quick Start: Auto-Fill from Your CV & Job Search</h3>
@@ -700,12 +886,12 @@ function App() {
               {/* Job Search */}
               {cvSkills && (
                 <div style={{padding: '1rem', backgroundColor: 'white', borderRadius: '8px'}}>
-                  <h4 style={{marginTop: 0, fontSize: '1rem'}}>🔍 Step 2: Search for Jobs (Optional)</h4>
+                  <h4 style={{marginTop: 0, fontSize: '1rem'}}>Step 2: Search for Jobs (Optional)</h4>
                   
                   {/* Suggested Roles Based on CV */}
                   {suggestedRoles.length > 0 && (
                     <div style={{marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '8px', borderLeft: '4px solid #4caf50'}}>
-                      <h5 style={{marginTop: 0, color: '#2e7d32', marginBottom: '0.75rem'}}>🎯 Recommended Job Roles Based on Your CV:</h5>
+                      <h5 style={{marginTop: 0, color: '#2e7d32', marginBottom: '0.75rem'}}>Recommended Job Roles Based on Your CV:</h5>
                       <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                         {suggestedRoles.map((role, idx) => (
                           <button
@@ -921,6 +1107,7 @@ function App() {
                                   type="button"
                                   onClick={() => {
                                     setJobDescription(description);
+                                    setCurrentStep(2); // Mark job description as chosen
                                     // Fill current skills from CV if available
                                     if (cvSkills) {
                                       const allSkills = [
@@ -930,7 +1117,6 @@ function App() {
                                       ];
                                       setCurrentSkills(allSkills.join(', '));
                                     }
-                                    alert(`Loaded: ${job.title} at ${job.company}`);
                                     window.scrollTo({top: 800, behavior: 'smooth'});
                                   }}
                                   style={{
@@ -1075,7 +1261,7 @@ function App() {
 
                 {/* Job Card with Matching Skills */}
                 <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '2px solid #61dafb', position: 'relative'}}>
-                  <h3 style={{marginTop: 0, marginBottom: '1rem', color: '#0277bd'}}>📋 Job Analysis Summary</h3>
+                  <h3 style={{marginTop: 0, marginBottom: '1rem', color: '#0277bd'}}>Job Analysis Summary</h3>
                   
                   {/* Match Score Badge */}
                   {currentSkills && result.skills_required && (
@@ -1153,7 +1339,7 @@ function App() {
                 </div>
 
                 <div className="result-section">
-                  <h3>🎯 Skill Gaps You Need to Fill:</h3>
+                  <h3>Skill Gaps You Need to Fill:</h3>
                   {result.skill_gaps.length > 0 ? (
                     <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                       {result.skill_gaps.map((gap, index) => (
@@ -1176,7 +1362,7 @@ function App() {
                 </div>
 
                 <div className="result-section">
-                  <h3>📚 Learning Plan:</h3>
+                  <h3>Learning Plan:</h3>
                   <div className="markdown-content" style={{
                     padding: '1rem',
                     backgroundColor: '#f5f5f5',
@@ -1392,7 +1578,7 @@ function App() {
               {/* Suggested Roles Based on CV */}
               {suggestedRoles.length > 0 && (
                 <div style={{padding: '1.5rem', backgroundColor: '#e8f5e9', borderRadius: '8px', marginBottom: '1.5rem'}}>
-                  <h4 style={{marginTop: 0, color: '#2e7d32'}}>🎯 Recommended Roles Based on Your CV:</h4>
+                  <h4 style={{marginTop: 0, color: '#2e7d32'}}>Recommended Roles Based on Your CV:</h4>
                   <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem'}}>
                     {suggestedRoles.map((role, idx) => (
                       <button
@@ -1432,7 +1618,7 @@ function App() {
 
               {/* Job Search Form */}
               <div style={{padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px'}}>
-                <h3 style={{marginTop: 0}}>🔍 Search for Jobs</h3>
+                <h3 style={{marginTop: 0}}>Search for Jobs</h3>
                 <div className="form-group">
                   <label>Job Keyword:</label>
                   <input

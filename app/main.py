@@ -271,35 +271,88 @@ async def analyze_job(request: JobAnalysisRequest):
 @app.post("/api/save-job-analysis")
 async def save_job_analysis(request: SaveJobAnalysisRequest):
     """Save a job analysis to the database"""
+    conn = None
     try:
         conn = get_db_connection()
+        # Set timeout to handle database locks
+        conn.execute("PRAGMA busy_timeout = 5000")
         cursor = conn.cursor()
 
+        # First, check if analysis already exists
         cursor.execute(
             """
-            INSERT INTO job_analyses
-            (user_id, job_title, company, skills_required, skill_gaps, learning_plan)
-            VALUES (?, ?, ?, ?, ?, ?)
+            SELECT id FROM job_analyses
+            WHERE user_id = ? AND job_title = ? AND company = ?
             """,
-            (
-                request.user_id,
-                request.job_title,
-                request.company,
-                json.dumps(request.skills_required),
-                json.dumps(request.skill_gaps),
-                request.learning_plan,
-            ),
+            (request.user_id, request.job_title, request.company),
         )
+        existing = cursor.fetchone()
 
-        analysis_id = cursor.lastrowid
+        if existing:
+            # Update existing analysis instead of inserting
+            cursor.execute(
+                """
+                UPDATE job_analyses
+                SET skills_required = ?, skill_gaps = ?, learning_plan = ?,
+                    analysis_date = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(request.skills_required),
+                    json.dumps(request.skill_gaps),
+                    request.learning_plan,
+                    existing[0],
+                ),
+            )
+            analysis_id = existing[0]
+            message = f"Job analysis updated successfully (ID: {analysis_id})"
+        else:
+            # Insert new analysis
+            cursor.execute(
+                """
+                INSERT INTO job_analyses
+                (user_id, job_title, company, skills_required, skill_gaps, learning_plan)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request.user_id,
+                    request.job_title,
+                    request.company,
+                    json.dumps(request.skills_required),
+                    json.dumps(request.skill_gaps),
+                    request.learning_plan,
+                ),
+            )
+            analysis_id = cursor.lastrowid
+            message = f"Job analysis saved successfully (ID: {analysis_id})"
+
         conn.commit()
-        conn.close()
-
-        return {"message": (f"Job analysis saved successfully with ID: {analysis_id}")}
+        return {"message": message, "id": analysis_id, "updated": existing is not None}
+    except sqlite3.IntegrityError:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This job analysis already exists. Please use a different job title or company name.",
+        )
+    except sqlite3.OperationalError as e:
+        if conn:
+            conn.rollback()
+        if "locked" in str(e).lower():
+            raise HTTPException(
+                status_code=503,
+                detail="Database is temporarily busy. Please try again in a moment.",
+            )
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=500, detail=f"Error saving job analysis: {str(e)}"
         )
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get("/api/user-analyses/{user_id}")
