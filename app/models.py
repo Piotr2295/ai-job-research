@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 
 class JobAnalysisRequest(BaseModel):
@@ -67,3 +68,46 @@ class ParsedResume(BaseModel):
     ]  # e.g., {"experience": "...", "skills": "...", "education": "..."}
     extracted_experiences: list[UserExperience]
     filename: str
+
+
+class EnhancedJobAnalysisRequest(BaseModel):
+    """Request for enhanced job analysis from resume"""
+
+    user_id: str
+    resume_id: int  # ID of uploaded resume
+    location: str = "remote"
+    experience_level: Optional[str] = None  # junior, mid, senior
+    num_jobs: int = 5
+    specific_role: Optional[str] = None  # e.g., "Python Developer"
+
+
+class SpecificJobAnalysisRequest(BaseModel):
+    """Analyze a specific job description against resume"""
+
+    user_id: str
+    resume_id: int
+    job_description: str
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+
+
+class JobMatchResult(BaseModel):
+    """Single job match result"""
+
+    job_info: dict
+    requirements: dict
+    skill_match: dict
+    gap_analysis: str
+    learning_resources: list[str]
+    recommendation: str
+
+
+class EnhancedJobAnalysisResponse(BaseModel):
+    """Response from enhanced job analysis"""
+
+    user_skills: dict
+    jobs_analyzed: int
+    job_matches: list[dict]  # List of JobMatchResult dicts
+    overall_recommendations: dict = {}  # Make optional with default
+    search_criteria: dict = {}  # Make optional with default
+    error_message: Optional[str] = None  # For when search fails
