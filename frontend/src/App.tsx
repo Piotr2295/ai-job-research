@@ -123,7 +123,7 @@ function App() {
 
   // Job Search state
   const [jobKeyword, setJobKeyword] = useState('');
-  const [jobLocation, setJobLocation] = useState('');
+  const [jobLocation, setJobLocation] = useState('Remote');
   const [jobResults, setJobResults] = useState<JobPosting[]>([]);
   const [cvSkills, setCvSkills] = useState<any>(null);
 
@@ -355,8 +355,6 @@ function App() {
         }
         
         setJobResults(jobs);
-        const matchInfo = cvSkills ? ' (sorted by match with your CV)' : '';
-        alert(`Found ${jobs.length} job(s) matching your search!${matchInfo}`);
       } else {
         setJobResults([]);
         alert(data.details || 'No jobs found matching your search criteria.');
@@ -669,16 +667,346 @@ function App() {
       <main className="container">
         {activeTab === 'analyze' && (
           <>
+            {/* CV Upload and Job Search Section */}
+            <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '2px solid #61dafb'}}>
+              <h3 style={{marginTop: 0, color: '#0277bd'}}>🚀 Quick Start: Auto-Fill from Your CV & Job Search</h3>
+              <p style={{color: '#666', marginBottom: '1.5rem'}}>Upload your CV and search for jobs to automatically populate the fields below, or fill them manually.</p>
+              
+              {/* CV Upload */}
+              <div style={{marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'white', borderRadius: '8px'}}>
+                <h4 style={{marginTop: 0, fontSize: '1rem'}}>📄 Step 1: Upload Your CV (Optional)</h4>
+                <div className="form-group">
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="file-input"
+                  />
+                  {selectedFile && <p className="file-name">Selected: {selectedFile.name}</p>}
+                  <button 
+                    onClick={uploadResume} 
+                    className="submit-btn" 
+                    disabled={!selectedFile}
+                    style={{marginTop: '0.5rem'}}
+                  >
+                    Upload CV & Extract Skills
+                  </button>
+                  {uploadStatus && <p className={`upload-status ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
+                    {uploadStatus}
+                  </p>}
+                </div>
+              </div>
+
+              {/* Job Search */}
+              {cvSkills && (
+                <div style={{padding: '1rem', backgroundColor: 'white', borderRadius: '8px'}}>
+                  <h4 style={{marginTop: 0, fontSize: '1rem'}}>🔍 Step 2: Search for Jobs (Optional)</h4>
+                  
+                  {/* Suggested Roles Based on CV */}
+                  {suggestedRoles.length > 0 && (
+                    <div style={{marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '8px', borderLeft: '4px solid #4caf50'}}>
+                      <h5 style={{marginTop: 0, color: '#2e7d32', marginBottom: '0.75rem'}}>🎯 Recommended Job Roles Based on Your CV:</h5>
+                      <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                        {suggestedRoles.map((role, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setJobKeyword(role)}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              backgroundColor: jobKeyword === role ? '#4caf50' : 'white',
+                              color: jobKeyword === role ? 'white' : '#4caf50',
+                              border: '2px solid #4caf50',
+                              borderRadius: '20px',
+                              cursor: 'pointer',
+                              fontSize: '0.9em',
+                              fontWeight: '500',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (jobKeyword !== role) {
+                                e.currentTarget.style.backgroundColor = '#f1f8e9';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (jobKeyword !== role) {
+                                e.currentTarget.style.backgroundColor = 'white';
+                              }
+                            }}
+                          >
+                            {role}
+                          </button>
+                        ))}
+                      </div>
+                      <p style={{fontSize: '0.85em', color: '#558b2f', margin: '0.75rem 0 0 0', fontStyle: 'italic'}}>
+                        Click any role to auto-fill the job keyword search
+                      </p>
+                    </div>
+                  )}
+
+                  <div style={{display: 'flex', gap: '1rem', marginBottom: '1rem'}}>
+                    <div className="form-group" style={{flex: 1}}>
+                      <label>Job Keyword:</label>
+                      <input
+                        type="text"
+                        value={jobKeyword}
+                        onChange={(e) => setJobKeyword(e.target.value)}
+                        placeholder="e.g., Python Developer"
+                      />
+                    </div>
+                    <div className="form-group" style={{flex: 1}}>
+                      <label>Location:</label>
+                      <input
+                        type="text"
+                        value={jobLocation}
+                        onChange={(e) => setJobLocation(e.target.value)}
+                        placeholder="e.g., San Francisco"
+                      />
+                    </div>
+                  </div>
+                  <button onClick={searchJobs} className="submit-btn" disabled={jobSearchLoading}>
+                    {jobSearchLoading ? (
+                      <>
+                        <span className="spinner"></span>
+                        Searching...
+                      </>
+                    ) : (
+                      'Search Jobs'
+                    )}
+                  </button>
+                  
+                  {/* Job Selection */}
+                  {jobResults.length > 0 && (
+                    <div style={{marginTop: '1rem'}}>
+                      <h5 style={{marginBottom: '0.75rem'}}>Select a job to analyze:</h5>
+                      <div style={{maxHeight: '600px', overflowY: 'auto'}}>
+                        {jobResults.slice(0, 10).map((job, index) => {
+                          const isExpanded = expandedJobDescriptions.has(`analyze-job-${index}`);
+                          const description = job.description || '';
+                          const shouldTruncate = description.length > 150;
+                          
+                          return (
+                            <div 
+                              key={index}
+                              style={{
+                                marginBottom: '1rem',
+                                padding: '1.25rem',
+                                backgroundColor: 'white',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: '8px',
+                                transition: 'all 0.2s ease',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                              }}
+                            >
+                              {/* Header with Title and Match Badge */}
+                              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem'}}>
+                                <div>
+                                  <h4 style={{margin: '0 0 0.25rem 0', color: '#0277bd', fontSize: '1.1em'}}>
+                                    {job.title}
+                                  </h4>
+                                  <p style={{margin: '0', fontSize: '0.9em', color: '#666'}}>
+                                    {job.company} • {job.location}
+                                  </p>
+                                </div>
+                                {job.matchPercentage !== undefined && (
+                                  <div style={{
+                                    padding: '0.5rem 1rem',
+                                    backgroundColor: job.matchPercentage >= 70 ? '#4caf50' : job.matchPercentage >= 40 ? '#ff9800' : '#f44336',
+                                    color: 'white',
+                                    borderRadius: '20px',
+                                    fontWeight: 'bold',
+                                    fontSize: '0.9em',
+                                    textAlign: 'center',
+                                    minWidth: '70px'
+                                  }}>
+                                    {job.matchPercentage}% Match
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Matching Skills */}
+                              {job.matchingSkills && job.matchingSkills.length > 0 && (
+                                <div style={{marginBottom: '0.75rem', padding: '0.75rem', backgroundColor: '#e8f5e9', borderRadius: '6px', borderLeft: '4px solid #4caf50'}}>
+                                  <strong style={{color: '#2e7d32', fontSize: '0.9em', display: 'block', marginBottom: '0.5rem'}}>
+                                    ✓ Your Matching Skills ({job.matchingSkills.length}):
+                                  </strong>
+                                  <div style={{display: 'flex', gap: '0.4rem', flexWrap: 'wrap'}}>
+                                    {job.matchingSkills.slice(0, 6).map((skill, idx) => (
+                                      <span key={idx} style={{
+                                        padding: '0.25rem 0.6rem',
+                                        backgroundColor: '#4caf50',
+                                        color: 'white',
+                                        borderRadius: '12px',
+                                        fontSize: '0.8em',
+                                        fontWeight: '500'
+                                      }}>
+                                        {skill}
+                                      </span>
+                                    ))}
+                                    {job.matchingSkills.length > 6 && (
+                                      <span style={{
+                                        padding: '0.25rem 0.6rem',
+                                        color: '#2e7d32',
+                                        fontSize: '0.8em',
+                                        fontStyle: 'italic'
+                                      }}>
+                                        +{job.matchingSkills.length - 6} more
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Job Description with Expand/Collapse */}
+                              <div style={{marginBottom: '0.75rem', padding: '0.75rem', backgroundColor: '#f8f9fa', borderRadius: '6px'}}>
+                                <strong style={{fontSize: '0.9em', display: 'block', marginBottom: '0.5rem'}}>Description:</strong>
+                                <p style={{
+                                  margin: '0',
+                                  whiteSpace: 'pre-wrap',
+                                  wordWrap: 'break-word',
+                                  lineHeight: '1.4',
+                                  fontSize: '0.9em',
+                                  color: '#555',
+                                  maxHeight: isExpanded ? 'none' : '100px',
+                                  overflow: isExpanded ? 'visible' : 'hidden',
+                                  transition: 'max-height 0.3s ease'
+                                }}>
+                                  {description}
+                                </p>
+                                {shouldTruncate && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      toggleJobDescription(`analyze-job-${index}`);
+                                    }}
+                                    style={{
+                                      marginTop: '0.5rem',
+                                      padding: '0.4rem 1rem',
+                                      backgroundColor: '#61dafb',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontSize: '0.85em',
+                                      fontWeight: '600',
+                                      transition: 'all 0.2s ease'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = '#4db8d8';
+                                      e.currentTarget.style.transform = 'scale(1.05)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = '#61dafb';
+                                      e.currentTarget.style.transform = 'scale(1)';
+                                    }}
+                                  >
+                                    {isExpanded ? '▲ Show Less' : '▼ View More'}
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Action Buttons */}
+                              <div style={{display: 'flex', gap: '0.75rem', justifyContent: 'space-between'}}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setJobDescription(description);
+                                    // Fill current skills from CV if available
+                                    if (cvSkills) {
+                                      const allSkills = [
+                                        ...(cvSkills.technical_skills || []),
+                                        ...(cvSkills.tools || []),
+                                        ...(cvSkills.languages || [])
+                                      ];
+                                      setCurrentSkills(allSkills.join(', '));
+                                    }
+                                    alert(`Loaded: ${job.title} at ${job.company}`);
+                                    window.scrollTo({top: 800, behavior: 'smooth'});
+                                  }}
+                                  style={{
+                                    flex: 1,
+                                    padding: '0.75rem 1rem',
+                                    backgroundColor: '#61dafb',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#4db8d8';
+                                    e.currentTarget.style.transform = 'scale(1.02)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#61dafb';
+                                    e.currentTarget.style.transform = 'scale(1)';
+                                  }}
+                                >
+                                  Analyze This Job
+                                </button>
+                                {job.url && (
+                                  <a 
+                                    href={job.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      padding: '0.75rem 1.5rem',
+                                      backgroundColor: '#4caf50',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      fontWeight: '600',
+                                      textDecoration: 'none',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      transition: 'all 0.2s ease'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = '#45a049';
+                                      e.currentTarget.style.transform = 'scale(1.02)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = '#4caf50';
+                                      e.currentTarget.style.transform = 'scale(1)';
+                                    }}
+                                  >
+                                    Apply Now →
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Manual Input Form */}
             <form onSubmit={handleSubmit} className="job-form">
               <div className="form-group">
                 <label htmlFor="jobDescription">
-                  Job Description:
+                  Job Description {cvSkills && '(Auto-filled or edit manually)'}:
                 </label>
                 <textarea
                   id="jobDescription"
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
-                  placeholder="Paste the job description here..."
+                  placeholder="Paste the job description here or select from search results above..."
                   required
                   rows={6}
                 />
@@ -686,7 +1014,7 @@ function App() {
 
               <div className="form-group">
                 <label htmlFor="currentSkills">
-                  Current Skills (comma-separated):
+                  Current Skills {cvSkills && '(Auto-filled from CV or edit manually)'}:
                 </label>
                 <input
                   type="text"
@@ -695,6 +1023,31 @@ function App() {
                   onChange={(e) => setCurrentSkills(e.target.value)}
                   placeholder="Python, JavaScript, React..."
                 />
+                {cvSkills && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allSkills = [
+                        ...(cvSkills.technical_skills || []),
+                        ...(cvSkills.tools || []),
+                        ...(cvSkills.languages || [])
+                      ];
+                      setCurrentSkills(allSkills.join(', '));
+                    }}
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#61dafb',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '0.9em'
+                    }}
+                  >
+                    Auto-fill from CV
+                  </button>
+                )}
               </div>
 
               <button type="submit" disabled={isLoading} className="submit-btn">
@@ -720,27 +1073,116 @@ function App() {
                   </div>
                 </div>
 
+                {/* Job Card with Matching Skills */}
+                <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '2px solid #61dafb', position: 'relative'}}>
+                  <h3 style={{marginTop: 0, marginBottom: '1rem', color: '#0277bd'}}>📋 Job Analysis Summary</h3>
+                  
+                  {/* Match Score Badge */}
+                  {currentSkills && result.skills_required && (
+                    (() => {
+                      const userSkillsArray = currentSkills.split(',').map(s => s.trim().toLowerCase());
+                      const matchingSkills = result.skills_required.filter((skill: string) =>
+                        userSkillsArray.some(userSkill => skill.toLowerCase().includes(userSkill) || userSkill.includes(skill.toLowerCase()))
+                      );
+                      const matchPercentage = result.skills_required.length > 0 
+                        ? Math.round((matchingSkills.length / result.skills_required.length) * 100)
+                        : 0;
+                      
+                      return (
+                        <>
+                          <div style={{
+                            position: 'absolute',
+                            top: '1.5rem',
+                            right: '1.5rem',
+                            backgroundColor: matchPercentage >= 70 ? '#4caf50' : matchPercentage >= 40 ? '#ff9800' : '#f44336',
+                            color: 'white',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '20px',
+                            fontWeight: 'bold',
+                            fontSize: '0.9em',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                          }}>
+                            {matchPercentage}% Match
+                          </div>
+                          
+                          {/* Matching Skills Display */}
+                          {matchingSkills.length > 0 && (
+                            <div style={{marginTop: '1rem', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '8px', borderLeft: '4px solid #4caf50'}}>
+                              <strong style={{color: '#2e7d32', display: 'block', marginBottom: '0.5rem'}}>
+                                ✓ Your Matching Skills ({matchingSkills.length}):
+                              </strong>
+                              <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                                {matchingSkills.map((skill: string, idx: number) => (
+                                  <span key={idx} style={{
+                                    padding: '0.25rem 0.75rem',
+                                    backgroundColor: '#4caf50',
+                                    color: 'white',
+                                    borderRadius: '12px',
+                                    fontSize: '0.85em',
+                                    fontWeight: '500'
+                                  }}>
+                                    {skill}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  )}
+                </div>
+
                 <div className="result-section">
-                  <h3>Skills Required:</h3>
-                  <ul>
+                  <h3>📌 Skills Required by This Job:</h3>
+                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                     {result.skills_required.map((skill, index) => (
-                      <li key={index}>{skill}</li>
+                      <span key={index} style={{
+                        padding: '0.5rem 1rem',
+                        backgroundColor: '#e3f2fd',
+                        color: '#1976d2',
+                        borderRadius: '20px',
+                        fontSize: '0.9em',
+                        fontWeight: '500',
+                        border: '1px solid #90caf9'
+                      }}>
+                        {skill}
+                      </span>
                     ))}
-                  </ul>
+                  </div>
                 </div>
 
                 <div className="result-section">
-                  <h3>Skill Gaps:</h3>
-                  <ul>
-                    {result.skill_gaps.map((gap, index) => (
-                      <li key={index}>{gap}</li>
-                    ))}
-                  </ul>
+                  <h3>🎯 Skill Gaps You Need to Fill:</h3>
+                  {result.skill_gaps.length > 0 ? (
+                    <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                      {result.skill_gaps.map((gap, index) => (
+                        <span key={index} style={{
+                          padding: '0.5rem 1rem',
+                          backgroundColor: '#fff3e0',
+                          color: '#e65100',
+                          borderRadius: '20px',
+                          fontSize: '0.9em',
+                          fontWeight: '500',
+                          border: '1px solid #ffe0b2'
+                        }}>
+                          {gap}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{color: '#4caf50', fontWeight: 'bold'}}>✓ Great! You have all the required skills!</p>
+                  )}
                 </div>
 
                 <div className="result-section">
-                  <h3>Learning Plan:</h3>
-                  <div className="markdown-content">
+                  <h3>📚 Learning Plan:</h3>
+                  <div className="markdown-content" style={{
+                    padding: '1rem',
+                    backgroundColor: '#f5f5f5',
+                    borderRadius: '8px',
+                    border: '1px solid #ddd'
+                  }}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {result.learning_plan}
                     </ReactMarkdown>
@@ -748,8 +1190,13 @@ function App() {
                 </div>
 
                 <div className="result-section">
-                  <h3>Relevant Resources:</h3>
-                  <div className="markdown-content">
+                  <h3>🔗 Relevant Resources:</h3>
+                  <div className="markdown-content" style={{
+                    padding: '1rem',
+                    backgroundColor: '#f5f5f5',
+                    borderRadius: '8px',
+                    border: '1px solid #ddd'
+                  }}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {result.relevant_resources.map((resource, index) => 
                         `${index + 1}. ${resource}`
