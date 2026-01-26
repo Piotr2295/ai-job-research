@@ -46,7 +46,7 @@ def parse_resume_sections(text: str) -> Dict[str, str]:
     # Split text into lines
     lines = text.split("\n")
     current_section = "general"
-    current_content = []
+    current_content: List[str] = []
 
     for line in lines:
         line = line.strip()
@@ -100,7 +100,7 @@ def extract_experiences_from_text(text: str) -> List[UserExperience]:
 
                 # Extract achievements (lines following the role/company)
                 # This is a simplified approach - could be enhanced
-                achievements = []
+                achievements: List[str] = []
 
                 experiences.append(
                     UserExperience(

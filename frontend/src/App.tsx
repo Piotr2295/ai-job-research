@@ -43,6 +43,58 @@ interface JobPosting {
   location: string;
   description: string;
   url: string;
+  matchPercentage?: number;
+  matchingSkills?: string[];
+  totalUserSkills?: number;
+}
+
+interface EnhancedJobMatch {
+  job_info: {
+    id: string;
+    title: string;
+    company: string;
+    location: string;
+    remote: boolean;
+    experience_level: string;
+    url: string;
+    salary_from?: number;
+    salary_to?: number;
+    salary_currency?: string;
+  };
+  requirements: any;
+  skill_match: {
+    matching_skills: string[];
+    skill_gaps: string[];
+    nice_to_have_matches: string[];
+    match_percentage: number;
+  };
+  gap_analysis: string;
+  learning_resources: string[];
+  recommendation: string;
+}
+
+interface EnhancedJobAnalysisResponse {
+  user_skills: {
+    technical_skills: string[];
+    soft_skills: string[];
+    tools: string[];
+    languages: string[];
+  };
+  jobs_analyzed: number;
+  job_matches: EnhancedJobMatch[];
+  overall_recommendations?: {
+    summary?: string;
+    top_skills_to_learn?: string[];
+    career_insights?: string;
+    best_match?: any;
+    message?: string;  // For error messages
+  };
+  search_criteria?: {
+    location: string;
+    experience_level: string | null;
+    specific_role: string | null;
+  };
+  error_message?: string;  // For when search fails
 }
 
 function App() {
@@ -73,6 +125,7 @@ function App() {
   const [jobKeyword, setJobKeyword] = useState('');
   const [jobLocation, setJobLocation] = useState('');
   const [jobResults, setJobResults] = useState<JobPosting[]>([]);
+  const [cvSkills, setCvSkills] = useState<any>(null);
 
   // Resume Optimization state
   const [userExperiences, setUserExperiences] = useState<Array<{
@@ -107,6 +160,11 @@ function App() {
   const [ragLoading, setRagLoading] = useState(false);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [jobSearchLoading, setJobSearchLoading] = useState(false);
+
+  // Enhanced Job Analysis state
+  const [uploadedResumeId, setUploadedResumeId] = useState<number | null>(null);
+  const [suggestedRoles, setSuggestedRoles] = useState<string[]>([]);
+  const [expandedJobDescriptions, setExpandedJobDescriptions] = useState<Set<string>>(new Set());
 
   // File Management state
   const [fileName, setFileName] = useState('');
@@ -255,8 +313,50 @@ function App() {
 
       // Success case
       if (data.jobs && data.jobs.length > 0) {
-        setJobResults(data.jobs);
-        alert(`Found ${data.jobs.length} job(s) matching your search!`);
+        let jobs = data.jobs;
+        
+        // If CV skills are available, analyze each job and calculate match
+        if (cvSkills) {
+          jobs = await Promise.all(data.jobs.map(async (job: any) => {
+            try {
+              // Extract skills from job description using simple keyword matching
+              const allUserSkills = [
+                ...(cvSkills.technical_skills || []),
+                ...(cvSkills.tools || []),
+                ...(cvSkills.languages || [])
+              ].map((s: string) => s.toLowerCase());
+              
+              const jobDesc = (job.description || '').toLowerCase();
+              
+              // Find matching skills
+              const matchingSkills = allUserSkills.filter((skill: string) => 
+                jobDesc.includes(skill.toLowerCase())
+              );
+              
+              // Simple match percentage calculation
+              const matchPercentage = allUserSkills.length > 0 
+                ? Math.round((matchingSkills.length / Math.min(allUserSkills.length, 15)) * 100)
+                : 0;
+              
+              return {
+                ...job,
+                matchPercentage,
+                matchingSkills,
+                totalUserSkills: allUserSkills.length
+              };
+            } catch (err) {
+              console.error('Error analyzing job:', err);
+              return { ...job, matchPercentage: 0, matchingSkills: [] };
+            }
+          }));
+          
+          // Sort jobs by match percentage (highest first)
+          jobs.sort((a: any, b: any) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
+        }
+        
+        setJobResults(jobs);
+        const matchInfo = cvSkills ? ' (sorted by match with your CV)' : '';
+        alert(`Found ${jobs.length} job(s) matching your search!${matchInfo}`);
       } else {
         setJobResults([]);
         alert(data.details || 'No jobs found matching your search criteria.');
@@ -386,18 +486,29 @@ function App() {
     }
   };
 
+  const toggleJobDescription = (jobId: string) => {
+    const newExpanded = new Set(expandedJobDescriptions);
+    if (newExpanded.has(jobId)) {
+      newExpanded.delete(jobId);
+    } else {
+      newExpanded.add(jobId);
+    }
+    setExpandedJobDescriptions(newExpanded);
+  };
+
   const uploadResume = async () => {
     if (!selectedFile) {
       alert('Please select a PDF file first');
       return;
     }
 
-    setUploadStatus('Uploading and parsing resume...');
+    setUploadStatus('Uploading...');
+    setSuggestedRoles([]);
 
     try {
       const formData = new FormData();
-      formData.append('user_id', userId);
       formData.append('file', selectedFile);
+      formData.append('user_id', userId);
 
       const response = await fetch('http://localhost:8000/api/upload-resume', {
         method: 'POST',
@@ -410,10 +521,29 @@ function App() {
 
       const data = await response.json();
       setParsedResume(data.parsed_resume);
-      setUploadStatus('Resume uploaded and parsed successfully!');
-      setSelectedFile(null);
+      setUploadedResumeId(data.resume_id); // Store resume ID for enhanced analysis
+      setUploadStatus(`✓ ${data.message}`);
+      
+      // Display suggested roles
+      if (data.suggested_roles && data.suggested_roles.length > 0) {
+        setSuggestedRoles(data.suggested_roles);
+      }
+      
+      // Extract and store skills from CV for job matching
+      if (data.resume_id) {
+        try {
+          const skillsResponse = await fetch(`http://localhost:8000/api/extract-skills/${data.resume_id}?user_id=${userId}`);
+          if (skillsResponse.ok) {
+            const skillsData = await skillsResponse.json();
+            setCvSkills(skillsData.skills);
+          }
+        } catch (err) {
+          console.error('Error extracting skills:', err);
+        }
+      }
+      
     } catch (err) {
-      setUploadStatus('Error uploading resume: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      setUploadStatus('Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
@@ -789,35 +919,102 @@ function App() {
         {activeTab === 'jobs' && (
           <div className="job-search">
             <h2>Job Search</h2>
+            
+            {/* Resume Upload Section */}
             <div className="job-search-form">
-              <div className="form-group">
-                <label>Job Keyword:</label>
-                <input
-                  type="text"
-                  value={jobKeyword}
-                  onChange={(e) => setJobKeyword(e.target.value)}
-                  placeholder="e.g., Python Developer"
-                />
+              <div style={{marginBottom: '2rem', padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px'}}>
+                <h3 style={{marginTop: 0}}>📄 Upload Your Resume (Optional)</h3>
+                <p style={{color: '#666', marginBottom: '1rem'}}>Upload your CV to help match relevant jobs</p>
+                <div className="form-group">
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="file-input"
+                  />
+                  {selectedFile && <p className="file-name">Selected: {selectedFile.name}</p>}
+                  <button onClick={uploadResume} className="submit-btn" disabled={!selectedFile}>
+                    Upload Resume
+                  </button>
+                  {uploadStatus && <p className={`upload-status ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
+                    {uploadStatus}
+                  </p>}
+                </div>
               </div>
-              <div className="form-group">
-                <label>Location:</label>
-                <input
-                  type="text"
-                  value={jobLocation}
-                  onChange={(e) => setJobLocation(e.target.value)}
-                  placeholder="e.g., San Francisco"
-                />
+
+              {/* Suggested Roles Based on CV */}
+              {suggestedRoles.length > 0 && (
+                <div style={{padding: '1.5rem', backgroundColor: '#e8f5e9', borderRadius: '8px', marginBottom: '1.5rem'}}>
+                  <h4 style={{marginTop: 0, color: '#2e7d32'}}>🎯 Recommended Roles Based on Your CV:</h4>
+                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem'}}>
+                    {suggestedRoles.map((role, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setJobKeyword(role)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          backgroundColor: jobKeyword === role ? '#4caf50' : 'white',
+                          color: jobKeyword === role ? 'white' : '#4caf50',
+                          border: '2px solid #4caf50',
+                          borderRadius: '20px',
+                          cursor: 'pointer',
+                          fontSize: '0.9em',
+                          fontWeight: '500',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (jobKeyword !== role) {
+                            e.currentTarget.style.backgroundColor = '#f1f8e9';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (jobKeyword !== role) {
+                            e.currentTarget.style.backgroundColor = 'white';
+                          }
+                        }}
+                      >
+                        {role}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{fontSize: '0.85em', color: '#558b2f', margin: 0, fontStyle: 'italic'}}>
+                    Click any role to auto-fill the job keyword search
+                  </p>
+                </div>
+              )}
+
+              {/* Job Search Form */}
+              <div style={{padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px'}}>
+                <h3 style={{marginTop: 0}}>🔍 Search for Jobs</h3>
+                <div className="form-group">
+                  <label>Job Keyword:</label>
+                  <input
+                    type="text"
+                    value={jobKeyword}
+                    onChange={(e) => setJobKeyword(e.target.value)}
+                    placeholder="e.g., Python Developer"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Location:</label>
+                  <input
+                    type="text"
+                    value={jobLocation}
+                    onChange={(e) => setJobLocation(e.target.value)}
+                    placeholder="e.g., San Francisco"
+                  />
+                </div>
+                <button onClick={searchJobs} className="submit-btn" disabled={jobSearchLoading}>
+                  {jobSearchLoading ? (
+                    <>
+                      <span className="spinner"></span>
+                      Searching...
+                    </>
+                  ) : (
+                    'Search Jobs'
+                  )}
+                </button>
               </div>
-              <button onClick={searchJobs} className="submit-btn" disabled={jobSearchLoading}>
-                {jobSearchLoading ? (
-                  <>
-                    <span className="spinner"></span>
-                    Searching...
-                  </>
-                ) : (
-                  'Search Jobs'
-                )}
-              </button>
             </div>
 
             {jobSearchLoading && (
@@ -829,20 +1026,125 @@ function App() {
 
             {jobResults.length > 0 && (
               <div className="job-results">
-                <h3>Job Results:</h3>
-                {jobResults.map((job, index) => (
-                  <div key={index} className="job-card">
-                    <h4>{job.title}</h4>
-                    <p><strong>Company:</strong> {job.company}</p>
-                    <p><strong>Location:</strong> {job.location}</p>
-                    <p>{job.description}</p>
-                    {job.url && (
-                      <a href={job.url} target="_blank" rel="noopener noreferrer">
-                        Apply Here
-                      </a>
-                    )}
-                  </div>
-                ))}
+                <h3>Job Results ({jobResults.length}):</h3>
+                {jobResults.map((job, index) => {
+                  const isExpanded = expandedJobDescriptions.has(`job-search-${index}`);
+                  const description = job.description || '';
+                  // Show button if description would be truncated by 150px max-height
+                  // Approximate: ~4 lines of text = ~100px at lineHeight 1.5, so if longer than ~200 chars, likely truncated
+                  const shouldTruncate = description.length > 150;
+                  
+                  return (
+                    <div key={index} className="job-card" style={{position: 'relative'}}>
+                      {/* Match Badge */}
+                      {job.matchPercentage !== undefined && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '1rem',
+                          right: '1rem',
+                          backgroundColor: job.matchPercentage >= 70 ? '#4caf50' : job.matchPercentage >= 40 ? '#ff9800' : '#f44336',
+                          color: 'white',
+                          padding: '0.5rem 1rem',
+                          borderRadius: '20px',
+                          fontWeight: 'bold',
+                          fontSize: '0.9em',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }}>
+                          {job.matchPercentage}% Match
+                        </div>
+                      )}
+                      
+                      <h4>{job.title}</h4>
+                      <p><strong>Company:</strong> {job.company}</p>
+                      <p><strong>Location:</strong> {job.location}</p>
+                      
+                      {/* Matching Skills Section */}
+                      {job.matchingSkills && job.matchingSkills.length > 0 && (
+                        <div style={{marginTop: '1rem', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '8px', borderLeft: '4px solid #4caf50'}}>
+                          <strong style={{color: '#2e7d32', display: 'block', marginBottom: '0.5rem'}}>
+                            ✓ Your Matching Skills ({job.matchingSkills.length}):
+                          </strong>
+                          <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                            {job.matchingSkills.slice(0, 10).map((skill: string, idx: number) => (
+                              <span key={idx} style={{
+                                padding: '0.25rem 0.75rem',
+                                backgroundColor: '#4caf50',
+                                color: 'white',
+                                borderRadius: '12px',
+                                fontSize: '0.85em',
+                                fontWeight: '500'
+                              }}>
+                                {skill}
+                              </span>
+                            ))}
+                            {job.matchingSkills.length > 10 && (
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                color: '#2e7d32',
+                                fontSize: '0.85em',
+                                fontStyle: 'italic'
+                              }}>
+                                +{job.matchingSkills.length - 10} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div style={{marginTop: '1rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px'}}>
+                        <strong>Description:</strong>
+                        <p style={{
+                          margin: '0.5rem 0 0 0',
+                          whiteSpace: 'pre-wrap',
+                          wordWrap: 'break-word',
+                          lineHeight: '1.5',
+                          maxHeight: isExpanded ? 'none' : '150px',
+                          overflow: isExpanded ? 'visible' : 'hidden',
+                          transition: 'max-height 0.3s ease'
+                        }}>
+                          {description}
+                        </p>
+                        {shouldTruncate && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleJobDescription(`job-search-${index}`);
+                            }}
+                            style={{
+                              marginTop: '0.75rem',
+                              padding: '0.5rem 1.25rem',
+                              backgroundColor: '#61dafb',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '0.95em',
+                              fontWeight: '600',
+                              transition: 'all 0.2s ease',
+                              display: 'block'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#4db8d8';
+                              e.currentTarget.style.transform = 'scale(1.05)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = '#61dafb';
+                              e.currentTarget.style.transform = 'scale(1)';
+                            }}
+                          >
+                            {isExpanded ? '▲ Show Less' : '▼ View More'}
+                          </button>
+                        )}
+                      </div>
+                      {job.url && (
+                        <a href={job.url} target="_blank" rel="noopener noreferrer" style={{display: 'inline-block', marginTop: '1rem'}}>
+                          Apply Here
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -942,12 +1244,39 @@ function App() {
                   
                   <div className="parsed-sections">
                     <h5>Extracted Sections:</h5>
-                    {Object.entries(parsedResume.sections).map(([section, content]: [string, any]) => (
-                      <div key={section} className="section-preview">
-                        <h6>{section.charAt(0).toUpperCase() + section.slice(1)}:</h6>
-                        <p>{content.substring(0, 200)}{content.length > 200 ? '...' : ''}</p>
-                      </div>
-                    ))}
+                    {Object.entries(parsedResume.sections).map(([section, content]: [string, any]) => {
+                      const isExpanded = expandedJobDescriptions.has(`resume-${section}`);
+                      const charLimit = 200;
+                      const shouldTruncate = content.length > charLimit;
+                      
+                      return (
+                        <div key={section} className="section-preview">
+                          <h6>{section.charAt(0).toUpperCase() + section.slice(1)}:</h6>
+                          <p>
+                            {isExpanded ? content : content.substring(0, charLimit)}
+                            {shouldTruncate && !isExpanded && '...'}
+                          </p>
+                          {shouldTruncate && (
+                            <button
+                              onClick={() => toggleJobDescription(`resume-${section}`)}
+                              style={{
+                                marginTop: '0.5rem',
+                                padding: '0.25rem 0.75rem',
+                                backgroundColor: '#61dafb',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '0.85em',
+                                fontWeight: '500'
+                              }}
+                            >
+                              {isExpanded ? 'Show Less' : 'View More'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {parsedResume.extracted_experiences && parsedResume.extracted_experiences.length > 0 && (
@@ -1145,9 +1474,7 @@ function App() {
           </div>
           </>
         )}
-
-        <>
-          {activeTab === 'rag' && (
+        {activeTab === 'rag' && (
             <div className="advanced-rag">
               <h2>Advanced RAG Pipeline Demo</h2>
               <p className="rag-description">
@@ -1315,7 +1642,6 @@ function App() {
               </div>
             </div>
           )}
-        </>
       </main>
     </div>
   );

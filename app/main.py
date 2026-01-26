@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from typing import Dict
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
@@ -10,6 +11,9 @@ from app.models import (
     SaveFileRequest,
     AddUserExperienceRequest,
     ResumeOptimizationRequest,
+    EnhancedJobAnalysisRequest,
+    SpecificJobAnalysisRequest,
+    EnhancedJobAnalysisResponse,
 )
 import sqlite3
 import json
@@ -159,6 +163,82 @@ def save_cv_file(user_id: str, file_content: bytes, original_filename: str) -> s
         f.write(file_content)
 
     return str(file_path)
+
+
+def _suggest_roles_from_skills(skills: Dict[str, list]) -> list:
+    """Suggest job roles based on extracted skills"""
+    technical_skills = skills.get("technical_skills", [])
+    tools = skills.get("tools", [])
+
+    all_skills = set([s.lower() for s in technical_skills + tools])
+
+    suggested_roles = []
+
+    # Role mapping based on common skill combinations
+    role_mappings = {
+        "Python Developer": ["python", "django", "flask", "fastapi"],
+        "Full Stack Developer": ["javascript", "react", "node", "python", "typescript"],
+        "Frontend Developer": [
+            "react",
+            "vue",
+            "angular",
+            "javascript",
+            "typescript",
+            "css",
+        ],
+        "Backend Developer": ["python", "java", "node", "api", "database"],
+        "DevOps Engineer": [
+            "docker",
+            "kubernetes",
+            "aws",
+            "jenkins",
+            "ci/cd",
+            "terraform",
+        ],
+        "Data Engineer": ["python", "sql", "spark", "airflow", "kafka"],
+        "Machine Learning Engineer": [
+            "python",
+            "tensorflow",
+            "pytorch",
+            "scikit-learn",
+            "ml",
+        ],
+        "Data Scientist": [
+            "python",
+            "pandas",
+            "numpy",
+            "machine learning",
+            "statistics",
+        ],
+        "Cloud Engineer": ["aws", "azure", "gcp", "cloud", "terraform"],
+        "Mobile Developer": [
+            "react native",
+            "flutter",
+            "ios",
+            "android",
+            "swift",
+            "kotlin",
+        ],
+        "QA Engineer": ["selenium", "pytest", "testing", "automation"],
+        "Software Engineer": ["programming", "software", "development"],
+    }
+
+    # Score each role
+    role_scores = {}
+    for role, required_skills in role_mappings.items():
+        matches = sum(1 for skill in required_skills if skill in all_skills)
+        if matches > 0:
+            role_scores[role] = matches
+
+    # Sort by score and return top 5
+    sorted_roles = sorted(role_scores.items(), key=lambda x: x[1], reverse=True)
+    suggested_roles = [role for role, score in sorted_roles[:5]]
+
+    # Always include "Software Engineer" if we have technical skills but no specific matches
+    if not suggested_roles and technical_skills:
+        suggested_roles = ["Software Engineer", "Developer"]
+
+    return suggested_roles
 
 
 # Initialize database on startup
@@ -340,7 +420,7 @@ async def analyze_github_profile(username: str):
             repos_data = repos_response.json()
 
         # Extract skills from repository languages and names
-        languages = {}
+        languages: Dict[str, int] = {}
         project_types = []
 
         for repo in repos_data:
@@ -502,7 +582,7 @@ async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
                     "title": job.get("job_title", "Unknown"),
                     "company": job.get("employer_name", "Unknown"),
                     "location": job.get("job_city", "Remote"),
-                    "description": (job.get("job_description", "")[:200] + "..."),
+                    "description": job.get("job_description", ""),
                     "url": job.get("job_apply_link", ""),
                 }
             )
@@ -657,8 +737,62 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
 
         # Read file content
         file_content = await file.read()
+        file_hash = compute_file_hash(file_content)
 
-        # Parse the resume
+        # Check for duplicate CV
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT cm.id, cm.resume_id, cm.original_filename, cm.upload_date, pr.full_text, pr.sections
+            FROM cv_metadata cm
+            JOIN parsed_resumes pr ON cm.resume_id = pr.id
+            WHERE cm.user_id = ? AND cm.file_hash = ?
+            ORDER BY cm.upload_date DESC
+            LIMIT 1
+            """,
+            (user_id, file_hash),
+        )
+
+        existing_cv = cursor.fetchone()
+
+        if existing_cv:
+            # Return existing resume data with suggestion roles
+            from app.skill_extractor import extract_skills_from_resume
+
+            resume_text = existing_cv[4]
+            sections = json.loads(existing_cv[5])
+
+            # Extract skills to suggest roles
+            skills = extract_skills_from_resume(resume_text, sections)
+            suggested_roles = _suggest_roles_from_skills(skills)
+
+            conn.close()
+
+            return {
+                "message": "This resume has already been uploaded",
+                "is_duplicate": True,
+                "resume_id": existing_cv[1],
+                "original_upload_date": existing_cv[3],
+                "file_path": None,
+                "file_hash": file_hash,
+                "file_size": len(file_content),
+                "parsed_resume": {
+                    "user_id": user_id,
+                    "filename": existing_cv[2],
+                    "sections": sections,
+                    "extracted_experiences": [],
+                    "full_text_preview": (
+                        resume_text[:500] + "..."
+                        if len(resume_text) > 500
+                        else resume_text
+                    ),
+                },
+                "suggested_roles": suggested_roles,
+            }
+
+        # Parse the resume (new upload)
         from app.resume_parser import parse_resume
 
         parsed_data = parse_resume(file_content, file.filename)
@@ -754,9 +888,18 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
         conn.commit()
         conn.close()
 
+        # Extract skills and suggest roles
+        from app.skill_extractor import extract_skills_from_resume
+
+        skills = extract_skills_from_resume(
+            parsed_data["full_text"], parsed_data["sections"]
+        )
+        suggested_roles = _suggest_roles_from_skills(skills)
+
         # Return parsed resume data
         return {
             "message": "Resume uploaded and parsed successfully",
+            "is_duplicate": False,
             "resume_id": resume_id,
             "file_path": file_path,
             "file_hash": file_hash,
@@ -774,6 +917,7 @@ async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
                     else parsed_data["full_text"]
                 ),
             },
+            "suggested_roles": suggested_roles,
         }
 
     except Exception as e:
@@ -977,4 +1121,182 @@ async def get_rag_performance_metrics():
         logger.error(f"Error getting RAG metrics: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error getting RAG metrics: {str(e)}"
+        )
+
+
+@app.post("/api/enhanced-job-analysis", response_model=EnhancedJobAnalysisResponse)
+async def enhanced_job_analysis(request: EnhancedJobAnalysisRequest):
+    """
+    Enhanced job analysis: Extract skills from resume, search jobs, analyze matches
+
+    This endpoint:
+    1. Retrieves the user's resume from database
+    2. Extracts skills from the resume
+    3. Searches JustJoin.it for matching jobs
+    4. Analyzes each job against user's skills
+    5. Returns ranked job matches with gap analysis and learning plans
+    """
+    try:
+        from app.enhanced_workflow import analyze_job_opportunities_from_resume
+
+        # Get resume from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT full_text, sections
+            FROM parsed_resumes
+            WHERE id = ? AND user_id = ?
+            """,
+            (request.resume_id, request.user_id),
+        )
+
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Resume not found for user {request.user_id} with ID {request.resume_id}",
+            )
+
+        resume_text = result[0]
+        sections = json.loads(result[1])
+
+        # Run enhanced analysis
+        logger.info(f"Starting enhanced job analysis for user {request.user_id}")
+        analysis_result = await analyze_job_opportunities_from_resume(
+            resume_text=resume_text,
+            resume_sections=sections,
+            location=request.location,
+            experience_level=request.experience_level,
+            num_jobs=request.num_jobs,
+            specific_role=request.specific_role,
+        )
+
+        logger.info(
+            f"Analysis complete. Found {analysis_result['jobs_analyzed']} job matches"
+        )
+
+        return EnhancedJobAnalysisResponse(**analysis_result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in enhanced job analysis: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error in enhanced job analysis: {str(e)}"
+        )
+
+
+@app.post("/api/analyze-specific-job")
+async def analyze_specific_job(request: SpecificJobAnalysisRequest):
+    """
+    Analyze a specific job description against user's resume
+
+    This endpoint:
+    1. Retrieves the user's resume
+    2. Extracts skills from resume
+    3. Analyzes the provided job description
+    4. Compares skills and identifies gaps
+    5. Generates learning plan
+    """
+    try:
+        from app.enhanced_workflow import analyze_specific_job_with_resume
+
+        # Get resume from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT full_text, sections
+            FROM parsed_resumes
+            WHERE id = ? AND user_id = ?
+            """,
+            (request.resume_id, request.user_id),
+        )
+
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Resume not found for user {request.user_id} with ID {request.resume_id}",
+            )
+
+        resume_text = result[0]
+        sections = json.loads(result[1])
+
+        # Analyze specific job
+        logger.info(f"Analyzing specific job for user {request.user_id}")
+        analysis_result = await analyze_specific_job_with_resume(
+            resume_text=resume_text,
+            resume_sections=sections,
+            job_description=request.job_description,
+            job_title=request.job_title,
+            company=request.company,
+        )
+
+        logger.info("Specific job analysis complete")
+
+        return analysis_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing specific job: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error analyzing specific job: {str(e)}"
+        )
+
+
+@app.get("/api/extract-skills/{resume_id}")
+async def extract_skills_from_resume_endpoint(resume_id: int, user_id: str):
+    """
+    Extract structured skills from a resume
+
+    Returns categorized skills: technical_skills, soft_skills, tools, languages
+    """
+    try:
+        from app.skill_extractor import extract_skills_from_resume
+
+        # Get resume from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT full_text, sections
+            FROM parsed_resumes
+            WHERE id = ? AND user_id = ?
+            """,
+            (resume_id, user_id),
+        )
+
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Resume not found for user {user_id} with ID {resume_id}",
+            )
+
+        resume_text = result[0]
+        sections = json.loads(result[1])
+
+        # Extract skills
+        skills = extract_skills_from_resume(resume_text, sections)
+
+        return {"resume_id": resume_id, "user_id": user_id, "skills": skills}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error extracting skills: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error extracting skills: {str(e)}"
         )
