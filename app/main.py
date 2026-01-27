@@ -1,8 +1,12 @@
 import hashlib
 import logging
 from typing import Dict
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from app.models import (
     JobAnalysisRequest,
     JobAnalysisResponse,
@@ -43,6 +47,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting configuration (per-client IP)
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/hour"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Database setup
 DB_PATH = Path(__file__).parent.parent / "mcp-server" / "job_research.db"
@@ -254,10 +264,11 @@ async def root():
 
 
 @app.post("/analyze", response_model=JobAnalysisResponse)
-async def analyze_job(request: JobAnalysisRequest):
+@limiter.limit("20/hour")
+async def analyze_job(request: Request, payload: JobAnalysisRequest):
     initial_state = {
-        "job_description": request.job_description,
-        "current_skills": request.current_skills,
+        "job_description": payload.job_description,
+        "current_skills": payload.current_skills,
     }
     result = agent.invoke(initial_state)
     return JobAnalysisResponse(
@@ -272,7 +283,8 @@ async def analyze_job(request: JobAnalysisRequest):
 
 
 @app.post("/api/save-job-analysis")
-async def save_job_analysis(request: SaveJobAnalysisRequest):
+@limiter.limit("40/hour")
+async def save_job_analysis(request: Request, payload: SaveJobAnalysisRequest):
     """Save a job analysis to the database"""
     conn = None
     try:
@@ -287,7 +299,7 @@ async def save_job_analysis(request: SaveJobAnalysisRequest):
             SELECT id FROM job_analyses
             WHERE user_id = ? AND job_title = ? AND company = ?
             """,
-            (request.user_id, request.job_title, request.company),
+            (payload.user_id, payload.job_title, payload.company),
         )
         existing = cursor.fetchone()
 
@@ -301,9 +313,9 @@ async def save_job_analysis(request: SaveJobAnalysisRequest):
                 WHERE id = ?
                 """,
                 (
-                    json.dumps(request.skills_required),
-                    json.dumps(request.skill_gaps),
-                    request.learning_plan,
+                    json.dumps(payload.skills_required),
+                    json.dumps(payload.skill_gaps),
+                    payload.learning_plan,
                     existing[0],
                 ),
             )
@@ -318,12 +330,12 @@ async def save_job_analysis(request: SaveJobAnalysisRequest):
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    request.user_id,
-                    request.job_title,
-                    request.company,
-                    json.dumps(request.skills_required),
-                    json.dumps(request.skill_gaps),
-                    request.learning_plan,
+                    payload.user_id,
+                    payload.job_title,
+                    payload.company,
+                    json.dumps(payload.skills_required),
+                    json.dumps(payload.skill_gaps),
+                    payload.learning_plan,
                 ),
             )
             analysis_id = cursor.lastrowid
@@ -544,7 +556,10 @@ async def analyze_github_profile(username: str):
 
 
 @app.get("/api/search-jobs")
-async def search_job_postings(keyword: str, location: str = "", limit: int = 5):
+@limiter.limit("60/hour")
+async def search_job_postings(
+    request: Request, keyword: str, location: str = "", limit: int = 5
+):
     """Search for job postings"""
     try:
         # Using JSearch API (requires RAPIDAPI_KEY environment variable)
@@ -745,21 +760,22 @@ async def add_user_experience(request: AddUserExperienceRequest):
 
 
 @app.post("/api/optimize-resume")
-async def optimize_resume(request: ResumeOptimizationRequest):
+@limiter.limit("20/hour")
+async def optimize_resume(request: Request, payload: ResumeOptimizationRequest):
     """Generate resume optimization suggestions based on job requirements and user experience"""
     try:
         logger.info("Starting optimize_resume endpoint")
         logger.info("Retrieving user experience")
         # Retrieve user's relevant experience
-        user_experience_query = f"experience {request.user_id} {request.target_role}"
+        user_experience_query = f"experience {payload.user_id} {payload.target_role}"
         relevant_experiences = retrieve_resources(user_experience_query, k=5)
         logger.info(f"Retrieved {len(relevant_experiences)} experiences")
 
         # Create optimization prompt
         optimization_state = {
-            "job_description": request.job_description,
-            "target_role": request.target_role,
-            "target_company": request.target_company,
+            "job_description": payload.job_description,
+            "target_role": payload.target_role,
+            "target_company": payload.target_company,
             "user_experiences": relevant_experiences,
             "task": "resume_optimization",
         }
@@ -784,7 +800,10 @@ async def optimize_resume(request: ResumeOptimizationRequest):
 
 
 @app.post("/api/upload-resume")
-async def upload_resume(user_id: str = Form(...), file: UploadFile = File(...)):
+@limiter.limit("20/hour")
+async def upload_resume(
+    request: Request, user_id: str = Form(...), file: UploadFile = File(...)
+):
     """Upload and parse a resume PDF file"""
     try:
         # Validate file type
@@ -1114,10 +1133,11 @@ async def get_resume(resume_id: int):
 
 
 @app.post("/api/advanced-rag-query")
-async def advanced_rag_query(request: dict):
+@limiter.limit("30/hour")
+async def advanced_rag_query(request: Request, payload: dict):
     """Query using advanced RAG pipeline with evaluation"""
     try:
-        question = request.get("question", "")
+        question = payload.get("question", "")
         if not question:
             raise HTTPException(status_code=400, detail="Question is required")
 
@@ -1181,7 +1201,8 @@ async def get_rag_performance_metrics():
 
 
 @app.post("/api/enhanced-job-analysis", response_model=EnhancedJobAnalysisResponse)
-async def enhanced_job_analysis(request: EnhancedJobAnalysisRequest):
+@limiter.limit("20/hour")
+async def enhanced_job_analysis(request: Request, payload: EnhancedJobAnalysisRequest):
     """
     Enhanced job analysis: Extract skills from resume, search jobs, analyze matches
 
@@ -1205,7 +1226,7 @@ async def enhanced_job_analysis(request: EnhancedJobAnalysisRequest):
             FROM parsed_resumes
             WHERE id = ? AND user_id = ?
             """,
-            (request.resume_id, request.user_id),
+            (payload.resume_id, payload.user_id),
         )
 
         result = cursor.fetchone()
@@ -1214,21 +1235,21 @@ async def enhanced_job_analysis(request: EnhancedJobAnalysisRequest):
         if not result:
             raise HTTPException(
                 status_code=404,
-                detail=f"Resume not found for user {request.user_id} with ID {request.resume_id}",
+                detail=f"Resume not found for user {payload.user_id} with ID {payload.resume_id}",
             )
 
         resume_text = result[0]
         sections = json.loads(result[1])
 
         # Run enhanced analysis
-        logger.info(f"Starting enhanced job analysis for user {request.user_id}")
+        logger.info(f"Starting enhanced job analysis for user {payload.user_id}")
         analysis_result = await analyze_job_opportunities_from_resume(
             resume_text=resume_text,
             resume_sections=sections,
-            location=request.location,
-            experience_level=request.experience_level,
-            num_jobs=request.num_jobs,
-            specific_role=request.specific_role,
+            location=payload.location,
+            experience_level=payload.experience_level,
+            num_jobs=payload.num_jobs,
+            specific_role=payload.specific_role,
         )
 
         logger.info(
@@ -1247,7 +1268,8 @@ async def enhanced_job_analysis(request: EnhancedJobAnalysisRequest):
 
 
 @app.post("/api/analyze-specific-job")
-async def analyze_specific_job(request: SpecificJobAnalysisRequest):
+@limiter.limit("20/hour")
+async def analyze_specific_job(request: Request, payload: SpecificJobAnalysisRequest):
     """
     Analyze a specific job description against user's resume
 
@@ -1271,7 +1293,7 @@ async def analyze_specific_job(request: SpecificJobAnalysisRequest):
             FROM parsed_resumes
             WHERE id = ? AND user_id = ?
             """,
-            (request.resume_id, request.user_id),
+            (payload.resume_id, payload.user_id),
         )
 
         result = cursor.fetchone()
@@ -1280,20 +1302,20 @@ async def analyze_specific_job(request: SpecificJobAnalysisRequest):
         if not result:
             raise HTTPException(
                 status_code=404,
-                detail=f"Resume not found for user {request.user_id} with ID {request.resume_id}",
+                detail=f"Resume not found for user {payload.user_id} with ID {payload.resume_id}",
             )
 
         resume_text = result[0]
         sections = json.loads(result[1])
 
         # Analyze specific job
-        logger.info(f"Analyzing specific job for user {request.user_id}")
+        logger.info(f"Analyzing specific job for user {payload.user_id}")
         analysis_result = await analyze_specific_job_with_resume(
             resume_text=resume_text,
             resume_sections=sections,
-            job_description=request.job_description,
-            job_title=request.job_title,
-            company=request.company,
+            job_description=payload.job_description,
+            job_title=payload.job_title,
+            company=payload.company,
         )
 
         logger.info("Specific job analysis complete")
