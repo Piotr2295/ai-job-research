@@ -32,10 +32,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Job Research & Summary Agent")
 
+# CORS configuration - supports both local dev and production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_origins=ALLOWED_ORIGINS,  # Configure via ALLOWED_ORIGINS env variable
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
