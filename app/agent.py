@@ -44,9 +44,7 @@ def retrieve_resources_node(state):
 
 def advanced_rag_query_node(state):
     """Use advanced RAG pipeline for complex queries"""
-    query = f"Advanced learning plan for skills: {' '.join(
-        state['skills_required']
-    )}"
+    query = "Advanced learning plan for skills: " + " ".join(state["skills_required"])
     advanced_response = query_advanced_rag(query)
     state["advanced_rag_response"] = advanced_response
 
