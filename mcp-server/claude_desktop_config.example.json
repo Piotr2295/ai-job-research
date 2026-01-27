@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "job-research-mcp": {
+      "command": "/absolute/path/to/your/project/.venv/bin/python",
+      "args": ["/absolute/path/to/your/project/mcp-server/server.py"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/your/project",
+        "PATH": "/absolute/path/to/your/project/.venv/bin:$PATH"
+      }
+    }
+  }
+}

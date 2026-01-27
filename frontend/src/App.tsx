@@ -1002,6 +1002,25 @@ function App() {
               {/* CV Upload */}
               <div style={{marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'white', borderRadius: '8px'}}>
                 <h4 style={{marginTop: 0, fontSize: '1rem'}}>Step 1: Upload Your CV (Optional)</h4>
+                
+                {/* Privacy Notice */}
+                <div style={{
+                  marginBottom: '1rem',
+                  padding: '1rem',
+                  backgroundColor: '#fff3cd',
+                  borderLeft: '4px solid #ffc107',
+                  borderRadius: '4px'
+                }}>
+                  <p style={{
+                    margin: 0,
+                    fontSize: '0.9em',
+                    color: '#856404',
+                    lineHeight: '1.5'
+                  }}>
+                    <strong>Privacy Notice:</strong> Please upload only anonymized CVs. Remove or redact personal information such as your full name, address, phone number, email, and photo before uploading. We recommend keeping only your skills, experience descriptions, and education details.
+                  </p>
+                </div>
+
                 <div className="form-group">
                   <input
                     type="file"
@@ -1985,6 +2004,25 @@ function App() {
             
             <div className="resume-section">
               <h3>Upload Your Resume (PDF)</h3>
+              
+              {/* Privacy Notice */}
+              <div style={{
+                marginBottom: '1.5rem',
+                padding: '1rem',
+                backgroundColor: '#fff3cd',
+                borderLeft: '4px solid #ffc107',
+                borderRadius: '4px'
+              }}>
+                <p style={{
+                  margin: 0,
+                  fontSize: '0.9em',
+                  color: '#856404',
+                  lineHeight: '1.5'
+                }}>
+                  <strong>Privacy Notice:</strong> Please upload only anonymized resumes. Remove or redact personal information such as your full name, address, phone number, email, and photo before uploading. We recommend keeping only your skills, experience descriptions, and education details.
+                </p>
+              </div>
+
               <div className="upload-section">
                 <div className="form-group">
                   <label>Upload PDF Resume:</label>

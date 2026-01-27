@@ -170,3 +170,6 @@ Thumbs.db
 # CV Storage - ignore user CV files but keep directory
 cv_storage/*
 !cv_storage/.gitkeep
+
+# MCP configuration - contains local paths
+mcp-server/claude_desktop_config.json
