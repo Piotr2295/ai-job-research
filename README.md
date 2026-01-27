@@ -2,6 +2,12 @@
 
 A comprehensive AI-powered platform for job analysis, skill development tracking, and career growth. Features LLM agents, RAG systems, MCP integration, and a unified web interface.
 
+
+
+https://github.com/user-attachments/assets/50408ccf-6c48-4ae6-9d3c-51e74c36cd0a
+
+
+
 ## Overview
 
 This platform provides multiple AI-powered tools for career development:
