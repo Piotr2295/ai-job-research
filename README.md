@@ -2,17 +2,14 @@
 
 A comprehensive AI-powered platform for job analysis, skill development tracking, and career growth. Features LLM agents, RAG systems, MCP integration, and a unified web interface.
 
-
-
 https://github.com/user-attachments/assets/50408ccf-6c48-4ae6-9d3c-51e74c36cd0a
-
-
 
 ## Overview
 
 This platform provides multiple AI-powered tools for career development:
 
 - **Job Analysis**: Analyze job descriptions to identify required skills, gaps, and learning plans
+- **Advanced RAG**: Multi-stage retrieval with quality evaluation to ground learning plans and responses
 - **Career Tracking**: Save and compare job analyses over time with persistent storage
 - **Learning Progress**: Track skill development with progress monitoring
 - **GitHub Analysis**: Extract skills and suggest roles from coding portfolios
@@ -224,6 +221,11 @@ Paste any job description and your current skills to get:
 - Skill gap analysis
 - Personalized learning plan
 - Relevant resources and courses
+
+### Advanced RAG Pipeline
+- Multi-stage retrieval that combines skills-derived queries with advanced context assembly for richer answers
+- Runs an evaluation step to score and surface RAG quality alongside the response
+- Feeds both basic and advanced RAG outputs into the learning plan for more grounded guidance
 
 ### Saved Analyses
 - Store unlimited job analyses
