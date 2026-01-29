@@ -266,17 +266,42 @@ async def root():
 @app.post("/analyze", response_model=JobAnalysisResponse)
 @limiter.limit("20/hour")
 async def analyze_job(request: Request, payload: JobAnalysisRequest):
-    initial_state = {
-        "job_description": payload.job_description,
-        "current_skills": payload.current_skills,
-    }
-    result = agent.invoke(initial_state)
-    return JobAnalysisResponse(
-        skills_required=result["skills_required"],
-        skill_gaps=result["skill_gaps"],
-        learning_plan=result["learning_plan"],
-        relevant_resources=result["relevant_resources"],
-    )
+    """Analyze a job using the agentic reasoning loop"""
+    try:
+        # Initialize agent state with required fields
+        initial_state = {
+            "job_description": payload.job_description,
+            "current_skills": payload.current_skills,
+            "job_title": getattr(payload, "job_title", ""),
+            "location": getattr(payload, "location", "Remote"),
+            "skills_required": [],
+            "skill_gaps": [],
+            "rag_results": None,
+            "skill_validation_results": None,
+            "market_research_results": None,
+            "gap_analysis_results": None,
+            "learning_plan_results": None,
+            "tool_call_count": 0,
+            "max_tool_calls": 5,
+            "executed_tools": [],
+            "agent_reasoning": [],
+            "learning_plan": "",
+            "analysis_quality_score": 0.0,
+            "rag_evaluation": {},
+        }
+
+        # Run the agentic workflow
+        result = agent.invoke(initial_state)
+
+        return JobAnalysisResponse(
+            skills_required=result["skills_required"],
+            skill_gaps=result["skill_gaps"],
+            learning_plan=result["learning_plan"],
+            relevant_resources=result.get("rag_results", {}).get("resources", []),
+        )
+    except Exception as e:
+        logger.error(f"Error in analyze_job: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # MCP Server functionality integrated into FastAPI

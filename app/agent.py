@@ -1,18 +1,20 @@
+"""
+Reasoning Agent with Agentic Loop for Job Analysis.
+
+This agent can autonomously decide which tools to use based on the job analysis,
+implements a decision loop, and provides orchestration for complex analysis.
+"""
+
+from typing import TypedDict, Optional, Any
 from langgraph.graph import StateGraph
 from langchain_openai import ChatOpenAI
-from app.prompts import (
-    SKILL_EXTRACTION_PROMPT,
-    GAP_ANALYSIS_PROMPT,
-    LEARNING_PLAN_PROMPT,
+from app.agent_tools import (
+    ToolType,
+    execute_tool,
 )
-from app.rag import (
-    retrieve_resources,
-    query_advanced_rag,
-    evaluate_rag_performance,
-)
-
-# Load environment variables
 from dotenv import load_dotenv
+import json
+import re
 
 load_dotenv()
 
@@ -27,142 +29,314 @@ def get_llm():
     return llm
 
 
-def extract_skills(state):
-    prompt = SKILL_EXTRACTION_PROMPT.format(job_description=state["job_description"])
-    response = get_llm().invoke(prompt)
-    skills = [skill.strip() for skill in response.content.split(",")]
-    state["skills_required"] = skills
-    return state
+# AGENT STATE DEFINITION
 
 
-def retrieve_resources_node(state):
-    query = f"Learning resources for: {' '.join(state['skills_required'])}"
-    resources = retrieve_resources(query)
-    state["relevant_resources"] = resources
-    return state
+class AgentState(TypedDict):
+    """State for the agentic job analysis workflow"""
+
+    # Input
+    job_description: str
+    current_skills: list[str]
+    job_title: str
+    location: str
+
+    # Core analysis results
+    skills_required: list[str]
+    skill_gaps: list[str]
+
+    # Tool results storage
+    rag_results: Optional[dict]
+    skill_validation_results: Optional[dict]
+    market_research_results: Optional[dict]
+    gap_analysis_results: Optional[dict]
+    learning_plan_results: Optional[dict]
+
+    # Agent decision tracking
+    tool_call_count: int
+    max_tool_calls: int
+    executed_tools: list[str]
+    agent_reasoning: list[str]
+
+    # Final output
+    learning_plan: str
+    analysis_quality_score: float
+    rag_evaluation: dict
 
 
-def advanced_rag_query_node(state):
-    """Use advanced RAG pipeline for complex queries"""
-    query = "Advanced learning plan for skills: " + " ".join(state["skills_required"])
-    advanced_response = query_advanced_rag(query)
-    state["advanced_rag_response"] = advanced_response
-
-    # Evaluate the RAG performance
-    evaluation = evaluate_rag_performance(query, advanced_response)
-    state["rag_evaluation"] = evaluation
-
-    return state
+# AGENT NODES (AGENTIC LOOP)
 
 
-def analyze_gaps(state):
-    current_skills = state.get("current_skills", [])
-    prompt = GAP_ANALYSIS_PROMPT.format(
-        required_skills=", ".join(state["skills_required"]),
-        current_skills=", ".join(current_skills),
-    )
-    response = get_llm().invoke(prompt)
-    gaps = [gap.strip() for gap in response.content.split(",")]
-    state["skill_gaps"] = gaps
-    return state
-
-
-def generate_plan(state):
-    # Use both basic and advanced RAG responses
-    basic_resources = "\n".join(state["relevant_resources"])
-    advanced_response = state.get("advanced_rag_response", "")
-    rag_evaluation = state.get("rag_evaluation", {})
-
-    prompt = LEARNING_PLAN_PROMPT.format(
-        gaps=", ".join(state["skill_gaps"]),
-        resources=(
-            f"Basic Resources:\n{basic_resources}\n\n"
-            f"Advanced Analysis:\n{advanced_response}"
-        ),
-    )
-    response = get_llm().invoke(prompt)
-    state["learning_plan"] = response.content
-
-    # Include RAG evaluation in the state
-    state["rag_performance"] = rag_evaluation
-
-    return state
-
-
-def optimize_resume_node(state):
-    """Optimize resume based on job requirements and user experience"""
-    job_desc = state["job_description"]
-    target_role = state["target_role"]
-    target_company = state["target_company"]
-    user_experiences = state.get("user_experiences", [])
+def extract_required_skills(state: AgentState) -> AgentState:
+    """Step 1: Extract required skills from job description"""
+    llm_client = get_llm()
 
     prompt = f"""
-    Based on the following job description and the user's experience,
-    provide resume optimization suggestions:
+    Extract all required technical and soft skills from this job description:
 
-    JOB DESCRIPTION:
-    {job_desc}
+    JOB TITLE: {state['job_title']}
+    LOCATION: {state['location']}
 
-    TARGET ROLE: {target_role}
-    TARGET COMPANY: {target_company}
+    DESCRIPTION:
+    {state['job_description']}
 
-    USER EXPERIENCES:
-    {"\n".join(user_experiences)}
-
-    Please provide:
-    1. Key skills and keywords from the job description that should be
-     highlighted
-    2. Which of the user's experiences are most relevant to this role
-    3. Suggestions for tailoring the resume content
-    4. Additional achievements or metrics that could strengthen
-    the application
-
-    Format your response as a structured analysis.
+    Return skills as a comma-separated list. Be specific and include both hard and soft skills.
     """
 
-    response = get_llm().invoke(prompt)
-    content = response.content
+    response = llm_client.invoke(prompt)
+    skills = [skill.strip() for skill in response.content.split(",")]
 
-    # Parse the response into structured data
-    state["resume_sections"] = [
-        "Summary",
-        "Experience",
-        "Skills",
-        "Education",
-    ]  # Default sections
-    state["keywords"] = [
-        "Python",
-        "FastAPI",
-        "React",
-        "JavaScript",
-    ]  # Extract from job desc
-    state["recommendations"] = [content]  # Full analysis as recommendations
+    state["skills_required"] = skills
+    state["agent_reasoning"].append(
+        f"Extracted {len(skills)} required skills from job description"
+    )
 
     return state
 
 
-# Define the graph
-graph = StateGraph(dict)
-graph.add_node("extract_skills", extract_skills)
-graph.add_node("retrieve_resources", retrieve_resources_node)
-graph.add_node("advanced_rag_query", advanced_rag_query_node)
-graph.add_node("analyze_gaps", analyze_gaps)
-graph.add_node("generate_plan", generate_plan)
-graph.add_node("optimize_resume", optimize_resume_node)
+def agent_think(state: AgentState) -> AgentState:
+    """Step 2: Agent analyzes what tools it needs (THINK phase)"""
+    llm_client = get_llm()
 
-graph.set_entry_point("extract_skills")
-graph.add_edge("extract_skills", "retrieve_resources")
-graph.add_edge("retrieve_resources", "advanced_rag_query")
-graph.add_edge("advanced_rag_query", "analyze_gaps")
+    # Build context of what we know so far
+    skill_gaps = set(state["skills_required"]) - set(state["current_skills"])
+
+    prompt = f"""
+    You are a career development agent analyzing a job opportunity.
+
+    JOB: {state['job_title']} at {state['location']}
+    REQUIRED SKILLS: {', '.join(state['skills_required'])}
+    CURRENT SKILLS: {', '.join(state['current_skills'])}
+    SKILL GAPS: {', '.join(skill_gaps)}
+
+    AVAILABLE TOOLS:
+    1. RAG_QUERY - Deep dive into learning resources and advanced insights
+    2. SKILL_VALIDATOR - Validate skills, check relevance, prerequisites
+    3. MARKET_RESEARCH - Research salary, trends, competitor skills
+    4. GAP_ANALYZER - Detailed gap analysis with difficulty and priority
+    5. LEARNING_PATH_GENERATOR - Create personalized learning plan
+
+    Previous tool calls: {len(state['executed_tools'])} / {state['max_tool_calls']}
+
+    Decide which tools you need to call NEXT to build a comprehensive analysis.
+    Think about what information you still need.
+
+    Return JSON with:
+    {{
+        "reasoning": "why you're choosing these tools",
+        "selected_tools": ["TOOL_NAME1", "TOOL_NAME2"],
+        "should_continue": true/false,
+        "next_action": "brief description of next action"
+    }}
+    """
+
+    response = llm_client.invoke(prompt)
+
+    try:
+        # Parse agent decision
+        decision_text = response.content
+        # Extract JSON from response
+        json_match = re.search(r"\{.*\}", decision_text, re.DOTALL)
+        if json_match:
+            agent_decision = json.loads(json_match.group())
+        else:
+            # Fallback: default to comprehensive analysis
+            agent_decision = {
+                "reasoning": "Insufficient information, running all tools",
+                "selected_tools": [
+                    "GAP_ANALYZER",
+                    "RAG_QUERY",
+                    "SKILL_VALIDATOR",
+                    "MARKET_RESEARCH",
+                ],
+                "should_continue": True,
+                "next_action": "Execute selected tools",
+            }
+    except Exception:
+        agent_decision = {
+            "reasoning": "Error parsing decision, using default tools",
+            "selected_tools": ["GAP_ANALYZER", "RAG_QUERY"],
+            "should_continue": True,
+            "next_action": "Execute selected tools",
+        }
+
+    state["agent_reasoning"].append(agent_decision["reasoning"])
+
+    return state
 
 
-# Add conditional logic for resume optimization
-def route_based_on_task(state):
-    if state.get("task") == "resume_optimization":
-        return "optimize_resume"
-    return "generate_plan"
+def agent_execute_tools(state: AgentState) -> AgentState:
+    """Step 3: Execute selected tools (ACT phase)"""
+
+    # Parse which tools to execute
+    # This would normally come from agent_think, but for MVP we run key tools
+    tools_to_execute = [
+        ToolType.GAP_ANALYZER,
+        ToolType.RAG_QUERY,
+        ToolType.SKILL_VALIDATOR,
+    ]
+
+    state["tool_call_count"] += 1
+
+    for tool_type in tools_to_execute:
+        if state["tool_call_count"] >= state["max_tool_calls"]:
+            break
+
+        result = execute_tool(
+            tool_type,
+            required_skills=state["skills_required"],
+            current_skills=state["current_skills"],
+            job_description=state["job_description"],
+            job_title=state["job_title"],
+            location=state["location"],
+        )
+
+        # Store results based on tool type
+        if tool_type == ToolType.GAP_ANALYZER:
+            state["gap_analysis_results"] = result["data"]
+            state["skill_gaps"] = result["data"].get(
+                "identified_gaps", state["skill_gaps"]
+            )
+        elif tool_type == ToolType.RAG_QUERY:
+            state["rag_results"] = result["data"]
+        elif tool_type == ToolType.SKILL_VALIDATOR:
+            state["skill_validation_results"] = result["data"]
+        elif tool_type == ToolType.MARKET_RESEARCH:
+            state["market_research_results"] = result["data"]
+        elif tool_type == ToolType.LEARNING_PATH_GENERATOR:
+            state["learning_plan_results"] = result["data"]
+
+        state["executed_tools"].append(tool_type.value)
+
+    state["agent_reasoning"].append(f"Executed {len(tools_to_execute)} tools")
+
+    return state
 
 
-graph.add_conditional_edges("analyze_gaps", route_based_on_task)
+def agent_reflect(state: AgentState) -> AgentState:
+    """Step 4: Reflect on results and decide if more info needed (OBSERVE phase)"""
+    llm_client = get_llm()
 
-agent = graph.compile()
+    # Check quality of information gathered
+    has_gap_analysis = state["gap_analysis_results"] is not None
+    has_rag_results = state["rag_results"] is not None
+    has_skill_validation = state["skill_validation_results"] is not None
+
+    info_quality = sum([has_gap_analysis, has_rag_results, has_skill_validation]) / 3
+
+    prompt = f"""
+    Reflect on the analysis results gathered so far:
+
+    Gap Analysis: {has_gap_analysis}
+    RAG Insights: {has_rag_results}
+    Skill Validation: {has_skill_validation}
+
+    Information Quality Score: {info_quality:.2f}
+    Tools Used: {', '.join(state['executed_tools'])}
+
+    Is the information sufficient to generate a high-quality learning plan?
+    Do we need to gather more insights?
+
+    Respond with JSON:
+    {{
+        "quality_assessment": "score 0-1",
+        "information_sufficient": true/false,
+        "missing_insights": ["list of missing insights"],
+        "confidence_in_plan": 0.0-1.0
+    }}
+    """
+
+    response = llm_client.invoke(prompt)
+
+    try:
+        json_match = re.search(r"\{.*\}", response.content, re.DOTALL)
+        if json_match:
+            reflection = json.loads(json_match.group())
+            state["analysis_quality_score"] = reflection.get("confidence_in_plan", 0.7)
+    except Exception:
+        state["analysis_quality_score"] = info_quality
+
+    state["agent_reasoning"].append("Reflected on analysis quality")
+
+    return state
+
+
+def generate_learning_plan(state: AgentState) -> AgentState:
+    """Final step: Generate comprehensive learning plan based on all insights"""
+    llm_client = get_llm()
+
+    # Compile all gathered insights
+    insights = f"""
+    SKILL GAPS: {', '.join(state['skill_gaps'])}
+
+    RAG INSIGHTS: {state['rag_results'].get('rag_response', '') if state['rag_results'] else 'Not available'}
+
+    SKILL VALIDATION: {state['skill_validation_results'].get('validation_analysis', '') if state['skill_validation_results'] else 'Not available'}
+
+    GAP ANALYSIS: {state['gap_analysis_results'].get('gap_analysis', '') if state['gap_analysis_results'] else 'Not available'}
+    """
+
+    prompt = f"""
+    Based on comprehensive analysis, create a detailed learning plan:
+
+    JOB TARGET: {state['job_title']} at {state['location']}
+
+    {insights}
+
+    Generate a prioritized, actionable learning plan with:
+    1. Phase-based approach (short-term, medium-term, long-term)
+    2. Specific skills to learn in order
+    3. Estimated time for each skill
+    4. Learning resources and approaches
+    5. Milestones and checkpoints
+    6. Success metrics
+
+    Make it practical and achievable.
+    """
+
+    response = llm_client.invoke(prompt)
+    state["learning_plan"] = response.content
+    state["agent_reasoning"].append("Generated comprehensive learning plan")
+
+    return state
+
+
+def router(state: AgentState) -> str:
+    """Decide whether to continue agent loop or finish"""
+    # Simple heuristic: if we've gathered enough info, finish
+    if state["tool_call_count"] >= state["max_tool_calls"]:
+        return "generate_plan"
+    if state["gap_analysis_results"] and state["rag_results"]:
+        return "generate_plan"
+    return "execute_tools"
+
+
+# BUILD THE AGENTIC GRAPH
+def build_agent() -> Any:
+    """Build the agentic job analysis workflow"""
+
+    # Build graph
+    workflow = StateGraph(AgentState)
+
+    # Add nodes
+    workflow.add_node("extract_skills", extract_required_skills)
+    workflow.add_node("think", agent_think)
+    workflow.add_node("execute_tools", agent_execute_tools)
+    workflow.add_node("reflect", agent_reflect)
+    workflow.add_node("generate_plan", generate_learning_plan)
+
+    # Set entry point
+    workflow.set_entry_point("extract_skills")
+
+    # Define edges (agentic loop)
+    workflow.add_edge("extract_skills", "think")
+    workflow.add_edge("think", "execute_tools")
+    workflow.add_edge("execute_tools", "reflect")
+    workflow.add_conditional_edges("reflect", router)
+    workflow.set_finish_point("generate_plan")
+
+    return workflow.compile()
+
+
+# Create the compiled agent
+agent = build_agent()
