@@ -862,6 +862,7 @@ async def upload_resume(
         if existing_cv:
             # Return existing resume data with suggestion roles
             from app.skill_extractor import extract_skills_from_resume
+            from app.resume_parser import extract_github_username
 
             resume_text = existing_cv[4]
             sections = json.loads(existing_cv[5])
@@ -869,6 +870,9 @@ async def upload_resume(
             # Extract skills to suggest roles
             skills = extract_skills_from_resume(resume_text, sections)
             suggested_roles = _suggest_roles_from_skills(skills)
+
+            # Extract GitHub username from existing resume
+            github_username = extract_github_username(resume_text)
 
             conn.close()
 
@@ -880,6 +884,7 @@ async def upload_resume(
                 "file_path": None,
                 "file_hash": file_hash,
                 "file_size": len(file_content),
+                "github_username": github_username,
                 "parsed_resume": {
                     "user_id": user_id,
                     "filename": existing_cv[2],
@@ -998,6 +1003,9 @@ async def upload_resume(
         )
         suggested_roles = _suggest_roles_from_skills(skills)
 
+        # Get extracted GitHub username from parsed data
+        github_username = parsed_data.get("github_username")
+
         # Return parsed resume data
         return {
             "message": "Resume uploaded and parsed successfully",
@@ -1006,6 +1014,7 @@ async def upload_resume(
             "file_path": file_path,
             "file_hash": file_hash,
             "file_size": file_size,
+            "github_username": github_username,
             "parsed_resume": {
                 "user_id": user_id,
                 "filename": file.filename,

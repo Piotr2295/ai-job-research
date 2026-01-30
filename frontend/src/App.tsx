@@ -680,6 +680,17 @@ function App() {
       setUploadStatus(`✓ ${data.message}`);
       setCurrentStep(1); // Mark step 1 as complete
       
+      // Auto-populate GitHub username if found in CV
+      if (data.github_username) {
+        setGithubUsername(data.github_username);
+        setNotification({
+          type: 'success',
+          message: `GitHub username "${data.github_username}" automatically detected from your CV!`
+        });
+        // Auto-hide notification after 5 seconds
+        setTimeout(() => setNotification(null), 5000);
+      }
+      
       // Display suggested roles
       if (data.suggested_roles && data.suggested_roles.length > 0) {
         setSuggestedRoles(data.suggested_roles);
