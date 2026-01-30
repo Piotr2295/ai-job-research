@@ -274,6 +274,7 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest):
             "current_skills": payload.current_skills,
             "job_title": getattr(payload, "job_title", ""),
             "location": getattr(payload, "location", "Remote"),
+            "github_username": payload.github_username,  # Add GitHub username
             "skills_required": [],
             "skill_gaps": [],
             "rag_results": None,
@@ -281,6 +282,7 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest):
             "market_research_results": None,
             "gap_analysis_results": None,
             "learning_plan_results": None,
+            "github_analysis_results": None,  # Initialize GitHub results storage
             "tool_call_count": 0,
             "max_tool_calls": 5,
             "executed_tools": [],

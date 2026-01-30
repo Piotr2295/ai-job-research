@@ -6,6 +6,7 @@ import './App.css';
 interface JobAnalysisRequest {
   job_description: string;
   current_skills: string[];
+  github_username?: string;  // Optional GitHub profile
 }
 
 interface JobAnalysisResponse {
@@ -207,7 +208,8 @@ function App() {
     try {
       const requestData: JobAnalysisRequest = {
         job_description: jobDescription,
-        current_skills: currentSkills.split(',').map(skill => skill.trim()).filter(skill => skill.length > 0)
+        current_skills: currentSkills.split(',').map(skill => skill.trim()).filter(skill => skill.length > 0),
+        github_username: githubUsername.trim() || undefined  // Add GitHub username if provided
       };
 
       const response = await fetch('http://localhost:8000/analyze', {
@@ -1394,6 +1396,22 @@ function App() {
                     Auto-fill from CV
                   </button>
                 )}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="githubUsername">
+                  GitHub Username (Optional):
+                </label>
+                <input
+                  type="text"
+                  id="githubUsername"
+                  value={githubUsername}
+                  onChange={(e) => setGithubUsername(e.target.value)}
+                  placeholder="e.g., octocat"
+                />
+                <p style={{fontSize: '0.85em', color: '#666', marginTop: '0.5rem', marginBottom: 0}}>
+                  Optional: Add your GitHub username to enrich analysis with your actual projects and technologies
+                </p>
               </div>
 
               <button type="submit" disabled={isLoading} className="submit-btn">

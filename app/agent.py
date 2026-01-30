@@ -40,6 +40,7 @@ class AgentState(TypedDict):
     current_skills: list[str]
     job_title: str
     location: str
+    github_username: Optional[str]  # Optional GitHub username for enriched analysis
 
     # Core analysis results
     skills_required: list[str]
@@ -51,6 +52,7 @@ class AgentState(TypedDict):
     market_research_results: Optional[dict]
     gap_analysis_results: Optional[dict]
     learning_plan_results: Optional[dict]
+    github_analysis_results: Optional[dict]  # GitHub profile analysis
 
     # Agent decision tracking
     tool_call_count: int
@@ -101,6 +103,9 @@ def agent_think(state: AgentState) -> AgentState:
     # Build context of what we know so far
     skill_gaps = set(state["skills_required"]) - set(state["current_skills"])
 
+    # Check if GitHub analysis is available
+    has_github = bool(state.get("github_username"))
+
     prompt = f"""
     You are a career development agent analyzing a job opportunity.
 
@@ -108,6 +113,7 @@ def agent_think(state: AgentState) -> AgentState:
     REQUIRED SKILLS: {', '.join(state['skills_required'])}
     CURRENT SKILLS: {', '.join(state['current_skills'])}
     SKILL GAPS: {', '.join(skill_gaps)}
+    {'GITHUB PROFILE: Available - ' + state.get('github_username', '') if has_github else 'GITHUB PROFILE: Not provided'}
 
     AVAILABLE TOOLS:
     1. RAG_QUERY - Deep dive into learning resources and advanced insights
@@ -115,11 +121,13 @@ def agent_think(state: AgentState) -> AgentState:
     3. MARKET_RESEARCH - Research salary, trends, competitor skills
     4. GAP_ANALYZER - Detailed gap analysis with difficulty and priority
     5. LEARNING_PATH_GENERATOR - Create personalized learning plan
+    6. GITHUB_ANALYZER - Analyze GitHub profile for proven skills and projects ({"AVAILABLE" if has_github else "NOT AVAILABLE - no username provided"})
 
     Previous tool calls: {len(state['executed_tools'])} / {state['max_tool_calls']}
 
     Decide which tools you need to call NEXT to build a comprehensive analysis.
     Think about what information you still need.
+    {f"IMPORTANT: GitHub profile is available - consider using GITHUB_ANALYZER to validate actual skills from projects." if has_github else ""}
 
     Return JSON with:
     {{
@@ -176,6 +184,10 @@ def agent_execute_tools(state: AgentState) -> AgentState:
         ToolType.SKILL_VALIDATOR,
     ]
 
+    # Add GitHub analyzer if username is provided
+    if state.get("github_username"):
+        tools_to_execute.insert(0, ToolType.GITHUB_ANALYZER)
+
     state["tool_call_count"] += 1
 
     for tool_type in tools_to_execute:
@@ -189,6 +201,7 @@ def agent_execute_tools(state: AgentState) -> AgentState:
             job_description=state["job_description"],
             job_title=state["job_title"],
             location=state["location"],
+            github_username=state.get("github_username", ""),
         )
 
         # Store results based on tool type
@@ -205,6 +218,17 @@ def agent_execute_tools(state: AgentState) -> AgentState:
             state["market_research_results"] = result["data"]
         elif tool_type == ToolType.LEARNING_PATH_GENERATOR:
             state["learning_plan_results"] = result["data"]
+        elif tool_type == ToolType.GITHUB_ANALYZER:
+            state["github_analysis_results"] = result["data"]
+            # Enrich current_skills with proven GitHub skills if successful
+            if result["success"] and "proven_skills" in result["data"]:
+                github_skills = result["data"]["proven_skills"].get(
+                    "programming_languages", []
+                )
+                # Add GitHub-proven skills to current skills
+                enriched_skills = set(state["current_skills"])
+                enriched_skills.update(github_skills)
+                state["current_skills"] = list(enriched_skills)
 
         state["executed_tools"].append(tool_type.value)
 
@@ -221,8 +245,19 @@ def agent_reflect(state: AgentState) -> AgentState:
     has_gap_analysis = state["gap_analysis_results"] is not None
     has_rag_results = state["rag_results"] is not None
     has_skill_validation = state["skill_validation_results"] is not None
+    has_github_analysis = state["github_analysis_results"] is not None
 
-    info_quality = sum([has_gap_analysis, has_rag_results, has_skill_validation]) / 3
+    info_quality = (
+        sum(
+            [
+                has_gap_analysis,
+                has_rag_results,
+                has_skill_validation,
+                has_github_analysis,
+            ]
+        )
+        / 4
+    )
 
     prompt = f"""
     Reflect on the analysis results gathered so far:
@@ -230,6 +265,7 @@ def agent_reflect(state: AgentState) -> AgentState:
     Gap Analysis: {has_gap_analysis}
     RAG Insights: {has_rag_results}
     Skill Validation: {has_skill_validation}
+    GitHub Analysis: {has_github_analysis}
 
     Information Quality Score: {info_quality:.2f}
     Tools Used: {', '.join(state['executed_tools'])}
@@ -265,7 +301,19 @@ def generate_learning_plan(state: AgentState) -> AgentState:
     """Final step: Generate comprehensive learning plan based on all insights"""
     llm_client = get_llm()
 
-    # Compile all gathered insights
+    # Compile all gathered insights including GitHub analysis
+    github_summary = ""
+    if state.get("github_analysis_results"):
+        gh = state["github_analysis_results"]
+        github_summary = f"""
+    GITHUB ANALYSIS:
+    - Profile: {gh.get('profile_url', 'N/A')}
+    - Total Repos: {gh.get('metrics', {}).get('total_repos', 0)}
+    - Languages: {', '.join([lang['name'] for lang in gh.get('languages', [])][:5])}
+    - Proven Skills: {', '.join(gh.get('proven_skills', {}).get('programming_languages', []))}
+    - Project Types: {', '.join(gh.get('project_types', []))}
+    """
+
     insights = f"""
     SKILL GAPS: {', '.join(state['skill_gaps'])}
 
@@ -274,6 +322,7 @@ def generate_learning_plan(state: AgentState) -> AgentState:
     SKILL VALIDATION: {state['skill_validation_results'].get('validation_analysis', '') if state['skill_validation_results'] else 'Not available'}
 
     GAP ANALYSIS: {state['gap_analysis_results'].get('gap_analysis', '') if state['gap_analysis_results'] else 'Not available'}
+    {github_summary}
     """
 
     prompt = f"""

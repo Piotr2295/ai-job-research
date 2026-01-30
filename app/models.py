@@ -5,6 +5,9 @@ from typing import Optional
 class JobAnalysisRequest(BaseModel):
     job_description: str
     current_skills: list[str] = []
+    github_username: Optional[str] = (
+        None  # Optional GitHub profile for enriched analysis
+    )
 
 
 class JobAnalysisResponse(BaseModel):

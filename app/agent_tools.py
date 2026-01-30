@@ -16,6 +16,7 @@ from app.prompts import (
     LEARNING_PLAN_PROMPT,
 )
 from dotenv import load_dotenv
+import httpx
 
 load_dotenv()
 
@@ -28,6 +29,7 @@ class ToolType(str, Enum):
     MARKET_RESEARCH = "market_research"
     LEARNING_PATH_GENERATOR = "learning_path_generator"
     GAP_ANALYZER = "gap_analyzer"
+    GITHUB_ANALYZER = "github_analyzer"
 
 
 class ToolResult(TypedDict):
@@ -266,6 +268,121 @@ def learning_path_generator_tool(
         )
 
 
+def github_analyzer_tool(github_username: str) -> ToolResult:
+    """
+    Analyze GitHub profile to extract technologies, projects, and proven skills.
+    This enriches job analysis with candidate's actual project portfolio.
+    """
+    try:
+        import asyncio
+
+        async def fetch_github_data():
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Get user profile
+                user_response = await client.get(
+                    f"https://api.github.com/users/{github_username}"
+                )
+                user_data = user_response.json()
+
+                # Get repositories (top 20 by update)
+                repos_response = await client.get(
+                    f"https://api.github.com/users/{github_username}/repos?sort=updated&per_page=20"
+                )
+                repos_data = repos_response.json()
+
+                return user_data, repos_data
+
+        # Run async fetch
+        user_data, repos_data = asyncio.run(fetch_github_data())
+
+        # Analyze languages and technologies
+        languages = {}
+        technologies = set()
+        project_types = set()
+
+        for repo in repos_data:
+            # Count language usage
+            if repo.get("language"):
+                languages[repo["language"]] = languages.get(repo["language"], 0) + 1
+
+            # Extract technologies from repo name and topics
+            name = repo.get("name", "").lower()
+            topics = repo.get("topics", [])
+
+            # Analyze project patterns
+            if any(kw in name for kw in ["api", "rest", "backend", "server"]):
+                project_types.add("API Development")
+            if any(kw in name for kw in ["react", "vue", "angular", "frontend", "ui"]):
+                project_types.add("Frontend Development")
+            if any(kw in name for kw in ["ml", "ai", "machine", "learning", "model"]):
+                project_types.add("Machine Learning")
+            if any(kw in name for kw in ["fastapi", "flask", "django"]):
+                project_types.add("Python Web Development")
+            if any(kw in name for kw in ["docker", "kubernetes", "k8s"]):
+                project_types.add("DevOps")
+            if any(kw in name for kw in ["test", "testing", "pytest", "jest"]):
+                project_types.add("Testing & QA")
+
+            # Add topics as technologies
+            for topic in topics:
+                technologies.add(topic)
+
+        # Calculate activity metrics
+        total_repos = user_data.get("public_repos", 0)
+        followers = user_data.get("followers", 0)
+        recent_activity = len([r for r in repos_data if r.get("updated_at")])
+
+        # Calculate confidence based on activity
+        confidence = min(
+            1.0,
+            (
+                (total_repos * 0.01)
+                + (followers * 0.005)
+                + (recent_activity * 0.02)
+                + (len(languages) * 0.05)
+            ),
+        )
+
+        # Sort languages by usage
+        top_languages = sorted(languages.items(), key=lambda x: x[1], reverse=True)
+
+        return ToolResult(
+            tool=ToolType.GITHUB_ANALYZER.value,
+            success=True,
+            data={
+                "username": github_username,
+                "profile_url": f"https://github.com/{github_username}",
+                "metrics": {
+                    "total_repos": total_repos,
+                    "followers": followers,
+                    "following": user_data.get("following", 0),
+                    "recent_activity": recent_activity,
+                },
+                "languages": [
+                    {"name": lang, "repos": count} for lang, count in top_languages
+                ],
+                "technologies": sorted(list(technologies)),
+                "project_types": sorted(list(project_types)),
+                "proven_skills": {
+                    "programming_languages": [lang for lang, _ in top_languages[:5]],
+                    "frameworks_and_tools": sorted(list(technologies))[:10],
+                    "experience_areas": sorted(list(project_types)),
+                },
+            },
+            confidence=confidence,
+            error=None,
+        )
+
+    except Exception as e:
+        return ToolResult(
+            tool=ToolType.GITHUB_ANALYZER.value,
+            success=False,
+            data={},
+            confidence=0.0,
+            error=f"GitHub analysis failed: {str(e)}",
+        )
+
+
 # TOOL EXECUTOR
 
 
@@ -299,6 +416,10 @@ def execute_tool(tool_type: ToolType, **kwargs) -> ToolResult:
             job_title=kwargs.get("job_title", ""),
             skill_gaps=kwargs.get("skill_gaps", []),
             current_level=kwargs.get("current_level", "intermediate"),
+        )
+    elif tool_type == ToolType.GITHUB_ANALYZER:
+        return github_analyzer_tool(
+            github_username=kwargs.get("github_username", ""),
         )
     else:
         return ToolResult(
