@@ -1,6 +1,6 @@
 import pdfplumber
 import PyPDF2
-from typing import Dict, List
+from typing import Dict, List, Optional
 from app.models import UserExperience
 import re
 import io
@@ -76,6 +76,42 @@ def parse_resume_sections(text: str) -> Dict[str, str]:
     return sections
 
 
+def extract_github_username(text: str) -> Optional[str]:
+    """
+    Extract GitHub username from resume text.
+    Looks for GitHub URLs in various formats:
+    - github.com/username
+    - www.github.com/username
+    - https://github.com/username
+    - @username (if preceded by 'github')
+    """
+    # Common GitHub URL patterns
+    github_patterns = [
+        r"(?i)(?:https?://)?(?:www\.)?github\.com/([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)",
+        r"(?i)github(?:\s*:)?\s*@?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)",
+        r"(?i)gh(?:\s*:)?\s*@?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)",
+    ]
+
+    for pattern in github_patterns:
+        match = re.search(pattern, text)
+        if match:
+            username = match.group(1)
+            # Filter out common false positives
+            if username.lower() not in [
+                "com",
+                "http",
+                "https",
+                "www",
+                "github",
+                "profile",
+            ]:
+                # Validate username (GitHub usernames are 1-39 characters)
+                if 1 <= len(username) <= 39:
+                    return username
+
+    return None
+
+
 def extract_experiences_from_text(text: str) -> List[UserExperience]:
     """Extract work experiences from resume text using LLM or regex patterns"""
     experiences = []
@@ -126,9 +162,13 @@ def parse_resume(file_content: bytes, filename: str) -> Dict:
     # Extract structured experiences
     extracted_experiences = extract_experiences_from_text(full_text)
 
+    # Extract GitHub username
+    github_username = extract_github_username(full_text)
+
     return {
         "full_text": full_text,
         "sections": sections,
         "extracted_experiences": extracted_experiences,
+        "github_username": github_username,
         "filename": filename,
     }
