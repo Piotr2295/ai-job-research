@@ -283,12 +283,16 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest):
             "gap_analysis_results": None,
             "learning_plan_results": None,
             "github_analysis_results": None,  # Initialize GitHub results storage
+            "validation_report": None,  # Self-validation report
+            "reflection_feedback": None,  # Reflection feedback
             "tool_call_count": 0,
             "max_tool_calls": 5,
             "executed_tools": [],
             "agent_reasoning": [],
+            "reflection_iterations": 0,  # Track reflection iterations
             "learning_plan": "",
             "analysis_quality_score": 0.0,
+            "analysis_confidence_score": 0.0,  # Confidence in analysis
             "rag_evaluation": {},
         }
 
