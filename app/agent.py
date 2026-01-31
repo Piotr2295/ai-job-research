@@ -12,6 +12,11 @@ from app.agent_tools import (
     ToolType,
     execute_tool,
 )
+from app.agent_reflection import (
+    validate_analysis,
+    get_reflection_feedback,
+    AnalysisValidation,
+)
 from dotenv import load_dotenv
 import json
 import re
@@ -54,15 +59,21 @@ class AgentState(TypedDict):
     learning_plan_results: Optional[dict]
     github_analysis_results: Optional[dict]  # GitHub profile analysis
 
+    # Self-reflection & validation
+    validation_report: Optional[dict]  # Complete validation report
+    reflection_feedback: Optional[dict]  # Actionable feedback from validation
+    analysis_quality_score: float
+    analysis_confidence_score: float
+
     # Agent decision tracking
     tool_call_count: int
     max_tool_calls: int
     executed_tools: list[str]
     agent_reasoning: list[str]
+    reflection_iterations: int  # Track how many times we've reflected
 
     # Final output
     learning_plan: str
-    analysis_quality_score: float
     rag_evaluation: dict
 
 
@@ -288,9 +299,11 @@ def agent_reflect(state: AgentState) -> AgentState:
         json_match = re.search(r"\{.*\}", response.content, re.DOTALL)
         if json_match:
             reflection = json.loads(json_match.group())
-            state["analysis_quality_score"] = reflection.get("confidence_in_plan", 0.7)
+            state["analysis_confidence_score"] = reflection.get(
+                "confidence_in_plan", 0.7
+            )
     except Exception:
-        state["analysis_quality_score"] = info_quality
+        state["analysis_confidence_score"] = info_quality
 
     state["agent_reasoning"].append("Reflected on analysis quality")
 
@@ -350,6 +363,80 @@ def generate_learning_plan(state: AgentState) -> AgentState:
     return state
 
 
+def self_validate_analysis(state: AgentState) -> AgentState:
+    """
+    Step 5: Self-validation & reflection on generated analysis.
+
+    This node validates the quality of the analysis and identifies gaps or issues.
+    If quality is low, it can trigger additional analysis or provide detailed feedback.
+    """
+    # Run comprehensive validation
+    validation_report: AnalysisValidation = validate_analysis(
+        required_skills=state["skills_required"],
+        current_skills=state["current_skills"],
+        skill_gaps=state["skill_gaps"],
+        learning_plan=state["learning_plan"],
+        github_username=state.get("github_username"),
+        rag_results=state.get("rag_results"),
+        skill_validation=state.get("skill_validation_results"),
+        market_research=state.get("market_research_results"),
+        gap_analysis=state.get("gap_analysis_results"),
+        github_analysis=state.get("github_analysis_results"),
+    )
+
+    # Store validation results
+    state["validation_report"] = {
+        "is_valid": validation_report.is_valid,
+        "overall_quality_score": validation_report.overall_quality_score,
+        "overall_confidence": validation_report.overall_confidence,
+        "completeness_score": validation_report.completeness_score,
+        "reliability_score": validation_report.reliability_score,
+        "requires_revision": validation_report.requires_revision,
+        "issues": [
+            {
+                "risk_level": issue.risk_level.value,
+                "category": issue.category,
+                "description": issue.description,
+                "recommendation": issue.recommendation,
+                "impact_score": issue.impact_score,
+            }
+            for issue in validation_report.issues
+        ],
+        "recommendations": validation_report.recommendations,
+        "validation_details": validation_report.validation_details,
+    }
+
+    # Get actionable feedback
+    feedback = get_reflection_feedback(validation_report)
+    state["reflection_feedback"] = {
+        "should_revise": feedback["should_revise"],
+        "revision_focus": feedback["revision_focus"],
+        "missing_analysis": feedback["missing_analysis"],
+        "strong_areas": feedback["strong_areas"],
+        "weak_areas": feedback["weak_areas"],
+        "action_items": feedback["action_items"],
+    }
+
+    # Update quality scores
+    state["analysis_quality_score"] = validation_report.overall_quality_score
+    state["analysis_confidence_score"] = validation_report.overall_confidence
+    state["reflection_iterations"] += 1
+
+    # Log reflection results
+    state["agent_reasoning"].append(
+        f"Validation complete: Quality={validation_report.overall_quality_score:.2f}, "
+        f"Confidence={validation_report.overall_confidence:.2f}, "
+        f"Issues={len(validation_report.issues)}"
+    )
+
+    if validation_report.requires_revision:
+        state["agent_reasoning"].append(
+            f"Revision needed - Focus areas: {', '.join(feedback['revision_focus'][:3])}"
+        )
+
+    return state
+
+
 def router(state: AgentState) -> str:
     """Decide whether to continue agent loop or finish"""
     # Simple heuristic: if we've gathered enough info, finish
@@ -373,16 +460,18 @@ def build_agent() -> Any:
     workflow.add_node("execute_tools", agent_execute_tools)
     workflow.add_node("reflect", agent_reflect)
     workflow.add_node("generate_plan", generate_learning_plan)
+    workflow.add_node("validate", self_validate_analysis)
 
     # Set entry point
     workflow.set_entry_point("extract_skills")
 
-    # Define edges (agentic loop)
+    # Define edges (agentic loop with validation)
     workflow.add_edge("extract_skills", "think")
     workflow.add_edge("think", "execute_tools")
     workflow.add_edge("execute_tools", "reflect")
     workflow.add_conditional_edges("reflect", router)
-    workflow.set_finish_point("generate_plan")
+    workflow.add_edge("generate_plan", "validate")
+    workflow.set_finish_point("validate")
 
     return workflow.compile()
 
