@@ -861,10 +861,12 @@ function App() {
           Job Search
         </button>
         <button
-          className={activeTab === 'resume' ? 'nav-btn active' : 'nav-btn'}
+          className={activeTab === 'resume' ? 'nav-btn active disabled-tab' : 'nav-btn disabled-tab'}
           onClick={() => setActiveTab('resume')}
+          disabled
+          title="Feature in Development"
         >
-          Resume Optimizer
+          Resume Optimizer <span className="dev-badge">In Development</span>
         </button>
         <button
           className={activeTab === 'rag' ? 'nav-btn active' : 'nav-btn'}
@@ -2029,6 +2031,10 @@ function App() {
         {activeTab === 'resume' && (
           <>
             <div className="resume-optimizer">
+              <div className="development-notice">
+                <h3>Feature in Development</h3>
+                <p>The Resume Optimizer is currently being enhanced with production-grade features. Check back soon!</p>
+              </div>
               <h2>Resume Optimizer</h2>
             
             <div className="resume-section">
