@@ -1,40 +1,67 @@
 import hashlib
+import json
 import logging
+import os
+import sqlite3
+from pathlib import Path
 from typing import Dict
+
+import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+
+from app.agent import agent
+from app.api_helpers import call_github_api, with_error_logging
+from app.database import DatabaseManager
+from app.error_handlers import register_error_handlers
+from app.exceptions import ValidationError
+from app.logging_config import PerformanceLogger, setup_logging
 from app.models import (
+    AddUserExperienceRequest,
+    EnhancedJobAnalysisRequest,
+    EnhancedJobAnalysisResponse,
     JobAnalysisRequest,
     JobAnalysisResponse,
-    SaveJobAnalysisRequest,
-    UpdateLearningProgressRequest,
-    SaveFileRequest,
-    AddUserExperienceRequest,
     ResumeOptimizationRequest,
-    EnhancedJobAnalysisRequest,
+    SaveFileRequest,
+    SaveJobAnalysisRequest,
     SpecificJobAnalysisRequest,
-    EnhancedJobAnalysisResponse,
+    UpdateLearningProgressRequest,
 )
-import sqlite3
-import json
-import os
-from pathlib import Path
-import httpx
-from app.agent import agent
 from app.rag import retrieve_resources
+from app.security import get_api_key
+from app.validators import (
+    validate_github_username,
+    validate_optional_string,
+    validate_required_string,
+    validate_skill_list,
+)
 
 # Load environment variables
-from dotenv import load_dotenv
-
 load_dotenv()
+
+# Setup structured logging
+setup_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    log_file=os.getenv("LOG_FILE"),
+    json_logs=os.getenv("JSON_LOGS", "false").lower() == "true",
+)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Job Research & Summary Agent")
+app = FastAPI(
+    title="AI Job Research & Summary Agent",
+    description="AI-powered job analysis and career development platform",
+    version="2.0.0",
+)
+
+# Register centralized error handlers
+register_error_handlers(app)
 
 # CORS configuration - supports both local dev and production
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
@@ -61,9 +88,12 @@ CV_STORAGE_PATH = Path(__file__).parent.parent / "cv_storage"
 # Create CV storage directory if it doesn't exist
 CV_STORAGE_PATH.mkdir(exist_ok=True)
 
+# Initialize database manager with proper error handling
+db_manager = DatabaseManager(DB_PATH, timeout=10.0)
+
 
 def get_db_connection():
-    """Get database connection"""
+    """Get database connection (legacy method - prefer db_manager)"""
     return sqlite3.connect(DB_PATH)
 
 
@@ -265,16 +295,30 @@ async def root():
 
 @app.post("/analyze", response_model=JobAnalysisResponse)
 @limiter.limit("20/hour")
+@with_error_logging
 async def analyze_job(request: Request, payload: JobAnalysisRequest):
     """Analyze a job using the agentic reasoning loop"""
-    try:
+    with PerformanceLogger(logger, "Job analysis"):
+        # Validate inputs
+        validate_skill_list(payload.current_skills)
+        if payload.github_username:
+            payload.github_username = validate_github_username(payload.github_username)
+
         # Initialize agent state with required fields
         initial_state = {
-            "job_description": payload.job_description,
-            "current_skills": payload.current_skills,
-            "job_title": getattr(payload, "job_title", ""),
-            "location": getattr(payload, "location", "Remote"),
-            "github_username": payload.github_username,  # Add GitHub username
+            "job_description": validate_required_string(
+                payload.job_description, "job_description", max_length=20000
+            ),
+            "current_skills": validate_skill_list(payload.current_skills),
+            "job_title": validate_optional_string(
+                getattr(payload, "job_title", ""), "job_title"
+            )
+            or "",
+            "location": validate_optional_string(
+                getattr(payload, "location", "Remote"), "location"
+            )
+            or "Remote",
+            "github_username": payload.github_username,
             "skills_required": [],
             "skill_gaps": [],
             "rag_results": None,
@@ -282,17 +326,17 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest):
             "market_research_results": None,
             "gap_analysis_results": None,
             "learning_plan_results": None,
-            "github_analysis_results": None,  # Initialize GitHub results storage
-            "validation_report": None,  # Self-validation report
-            "reflection_feedback": None,  # Reflection feedback
+            "github_analysis_results": None,
+            "validation_report": None,
+            "reflection_feedback": None,
             "tool_call_count": 0,
             "max_tool_calls": 5,
             "executed_tools": [],
             "agent_reasoning": [],
-            "reflection_iterations": 0,  # Track reflection iterations
+            "reflection_iterations": 0,
             "learning_plan": "",
             "analysis_quality_score": 0.0,
-            "analysis_confidence_score": 0.0,  # Confidence in analysis
+            "analysis_confidence_score": 0.0,
             "rag_evaluation": {},
         }
 
@@ -305,9 +349,6 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest):
             learning_plan=result["learning_plan"],
             relevant_resources=result.get("rag_results", {}).get("resources", []),
         )
-    except Exception as e:
-        logger.error(f"Error in analyze_job: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # MCP Server functionality integrated into FastAPI
@@ -504,19 +545,24 @@ async def update_learning_progress(request: UpdateLearningProgressRequest):
 
 
 @app.get("/api/analyze-github/{username}")
+@with_error_logging
 async def analyze_github_profile(username: str):
     """Analyze a GitHub profile"""
-    try:
-        async with httpx.AsyncClient() as client:
-            # Get user profile
-            user_response = await client.get(f"https://api.github.com/users/{username}")
-            user_data = user_response.json()
+    with PerformanceLogger(logger, f"GitHub profile analysis: {username}"):
+        # Validate username
+        username = validate_github_username(username)
+        if not username:
+            raise ValidationError("Invalid GitHub username", field="username")
 
-            # Get user repositories
-            repos_response = await client.get(
-                f"https://api.github.com/users/{username}/repos?sort=updated&per_page=10"
-            )
-            repos_data = repos_response.json()
+        github_token = get_api_key("GITHUB_TOKEN", required=False)
+
+        # Get user profile
+        user_data = await call_github_api(f"users/{username}", github_token)
+
+        # Get user repositories
+        repos_data = await call_github_api(
+            f"users/{username}/repos?sort=updated&per_page=10", github_token
+        )
 
         # Extract skills from repository languages and names
         languages: Dict[str, int] = {}
@@ -579,11 +625,6 @@ async def analyze_github_profile(username: str):
         ]
 
         return analysis
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error analyzing GitHub profile: {str(e)}"
-        )
 
 
 @app.get("/api/search-jobs")
