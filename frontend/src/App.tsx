@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import AgentGraphVisualizer from './AgentGraphVisualizer';
 import './App.css';
 
 interface JobAnalysisRequest {
@@ -212,7 +213,7 @@ function App() {
         github_username: githubUsername.trim() || undefined  // Add GitHub username if provided
       };
 
-      const response = await fetch('http://localhost:8000/analyze', {
+      const response = await fetch('http://localhost:8000/api/agent/analyze-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -325,7 +326,7 @@ function App() {
         ]
       };
 
-      const analyzeResp = await fetch('http://localhost:8000/analyze', {
+      const analyzeResp = await fetch('http://localhost:8000/api/agent/analyze-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData)
@@ -1437,6 +1438,29 @@ function App() {
               </div>
             )}
 
+            {/* Real-Time Visualization - Shows during and after analysis */}
+            {(isLoading || result) && (
+              <div className="result-section" style={{
+                marginTop: '2rem',
+                padding: '1.5rem',
+                backgroundColor: '#f0f9ff',
+                borderRadius: '8px',
+                border: '2px solid #61dafb'
+              }}>
+                <h3 style={{marginTop: 0, color: '#0277bd'}}>
+                  {isLoading ? 'Agent Execution in Progress...' : 'Agent Execution Complete'}
+                </h3>
+                <div style={{
+                  padding: '1rem',
+                  backgroundColor: 'white',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd'
+                }}>
+                  <AgentGraphVisualizer />
+                </div>
+              </div>
+            )}
+
             {result && (
               <div className="results">
                 <div className="result-header">
@@ -1565,7 +1589,7 @@ function App() {
                 </div>
 
                 <div className="result-section">
-                  <h3>🔗 Relevant Resources:</h3>
+                  <h3>Relevant Resources:</h3>
                   <div className="markdown-content" style={{
                     padding: '1rem',
                     backgroundColor: '#f5f5f5',

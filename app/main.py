@@ -1459,3 +1459,140 @@ async def extract_skills_from_resume_endpoint(resume_id: int, user_id: str):
         raise HTTPException(
             status_code=500, detail=f"Error extracting skills: {str(e)}"
         )
+
+
+# Agent Graph Visualization Endpoints
+
+
+@app.get("/api/agent/graph")
+async def get_agent_graph():
+    """Get the agent graph structure for visualization"""
+    from app.agent_events import get_event_emitter
+
+    emitter = get_event_emitter()
+    return emitter.get_graph_visualization()
+
+
+@app.get("/api/agent/timeline")
+async def get_agent_timeline():
+    """Get the execution timeline for visualization"""
+    from app.agent_events import get_event_emitter
+
+    emitter = get_event_emitter()
+    return {"timeline": emitter.get_execution_timeline()}
+
+
+@app.post("/api/agent/analyze-stream")
+@limiter.limit("10/hour")
+async def analyze_job_with_streaming(request: Request, payload: JobAnalysisRequest):
+    """Analyze a job with real-time event streaming"""
+    from app.agent_events import get_event_emitter, EventType
+
+    with PerformanceLogger(logger, "Streaming job analysis"):
+        # Validate inputs
+        validate_skill_list(payload.current_skills)
+        if payload.github_username:
+            payload.github_username = validate_github_username(payload.github_username)
+
+        emitter = get_event_emitter()
+
+        # Emit start event
+        emitter.emit_event(
+            EventType.AGENT_START,
+            status="initializing",
+            data={
+                "job_title": getattr(payload, "job_title", ""),
+                "skills_count": len(payload.current_skills),
+            },
+        )
+
+        # Initialize agent state
+        initial_state = {
+            "job_description": validate_required_string(
+                payload.job_description, "job_description", max_length=20000
+            ),
+            "current_skills": validate_skill_list(payload.current_skills),
+            "job_title": validate_optional_string(
+                getattr(payload, "job_title", ""), "job_title"
+            )
+            or "",
+            "location": validate_optional_string(
+                getattr(payload, "location", "Remote"), "location"
+            )
+            or "Remote",
+            "github_username": payload.github_username,
+            "skills_required": [],
+            "skill_gaps": [],
+            "rag_results": None,
+            "skill_validation_results": None,
+            "market_research_results": None,
+            "gap_analysis_results": None,
+            "learning_plan_results": None,
+            "github_analysis_results": None,
+            "validation_report": None,
+            "reflection_feedback": None,
+            "tool_call_count": 0,
+            "max_tool_calls": 5,
+            "executed_tools": [],
+            "agent_reasoning": [],
+            "reflection_iterations": 0,
+            "learning_plan": "",
+            "analysis_quality_score": 0.0,
+            "analysis_confidence_score": 0.0,
+            "rag_evaluation": {},
+        }
+
+        try:
+            # Emit node execution events
+            for node_name in [
+                "extract_skills",
+                "think",
+                "execute_tools",
+                "reflect",
+                "generate_plan",
+                "validate",
+            ]:
+                emitter.emit_event(EventType.NODE_START, node_name=node_name)
+
+            # Run the agentic workflow
+            result = agent.invoke(initial_state)
+
+            # Emit completion event
+            emitter.emit_event(
+                EventType.ANALYSIS_COMPLETE,
+                status="success",
+                data={
+                    "skills_required": result["skills_required"],
+                    "skill_gaps": result["skill_gaps"],
+                },
+            )
+
+            return {
+                "skills_required": result["skills_required"],
+                "skill_gaps": result["skill_gaps"],
+                "learning_plan": result["learning_plan"],
+                "relevant_resources": result.get("rag_results", {}).get(
+                    "resources", []
+                ),
+                "events_emitted": len(emitter.events_history),
+            }
+
+        except Exception as e:
+            emitter.emit_event(EventType.AGENT_END, status="error", error=str(e))
+            raise HTTPException(
+                status_code=500, detail=f"Error during analysis: {str(e)}"
+            )
+
+
+@app.get("/api/agent/events")
+async def get_agent_events():
+    """Get all collected agent events"""
+    from app.agent_events import get_event_emitter
+
+    emitter = get_event_emitter()
+    events = [event.to_dict() for event in emitter.events_history]
+    return {
+        "events": events,
+        "total_count": len(events),
+        "graph": emitter.get_graph_visualization(),
+    }
