@@ -4,10 +4,10 @@ repos:
     hooks:
       - id: black
         language_version: python3
-        files: ^app/.*\.py$
+        files: ^(app|mcp-server)/.*\.py$
   - repo: https://github.com/PyCQA/flake8
     rev: 7.0.0
     hooks:
       - id: flake8
         language_version: python3
-        files: ^app/.*\.py$
+        files: ^(app|mcp-server)/.*\.py$
